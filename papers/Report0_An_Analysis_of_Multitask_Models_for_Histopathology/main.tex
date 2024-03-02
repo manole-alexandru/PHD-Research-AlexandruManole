@@ -1,0 +1,170 @@
+%latex model.tex
+%bibtex model
+%latex model.tex
+%latex model.tex
+%pdflatex model.tex
+
+%se poate lucra si online (de ex www.overleaf.com)
+
+
+\documentclass[runningheads,a4paper,11pt]{report}
+
+\usepackage{algorithmic}
+\usepackage{algorithm} 
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{caption}
+\usepackage{comment} 
+\usepackage{epsfig} 
+\usepackage{fancyhdr}
+\usepackage[T1]{fontenc}
+\usepackage{geometry} 
+\usepackage{graphicx}
+\usepackage[colorlinks]{hyperref} 
+\usepackage[latin1]{inputenc}
+\usepackage{multicol}
+\usepackage{multirow} 
+\usepackage{rotating}
+\usepackage{setspace}
+\usepackage{subfigure}
+\usepackage{url}
+\usepackage{verbatim}
+\usepackage{xcolor}
+\usepackage{textcomp, gensymb}
+\usepackage{caption}
+\usepackage{combelow}
+
+\usepackage{array,amsfonts}
+
+\newcommand\myfunc[5]{%
+  \begingroup
+  \setlength\arraycolsep{0pt}
+  #1\colon\begin{array}[t]{c >{{}}c<{{}} c}
+             #2 & \to & #3 \\ \\
+          \end{array}%
+  \endgroup}
+
+\geometry{a4paper,top=3cm,left=2cm,right=2cm,bottom=3cm}
+\definecolor{forestgreen}{RGB}{52,194,48}
+\definecolor{mycolor}{RGB}{0, 153, 255}
+
+\pagestyle{fancy}
+\setlength{\headheight}{23.11996pt}
+\addtolength{\topmargin}{-11.11996pt}
+\fancyhead[R]{An Analysis of Multitask Models for Histopathology}
+\fancyhead[L]{Data Mining Research Report}
+
+
+\renewcommand{\headrulewidth}{2pt}
+\renewcommand{\footrulewidth}{1pt}
+\renewcommand{\headrule}{\hbox to\headwidth{%
+  \color{mycolor}\leaders\hrule height \headrulewidth\hfill}}
+\renewcommand{\footrule}{\hbox to\headwidth{%
+  \color{mycolor}\leaders\hrule height \footrulewidth\hfill}}
+
+\hypersetup{
+pdftitle={artTitle},
+pdfauthor={name},
+pdfkeywords={pdf, latex, tex, ps2pdf, dvipdfm, pdflatex},
+bookmarksnumbered,
+pdfstartview={FitH},
+urlcolor=cyan,
+colorlinks=true,
+linkcolor=black,
+citecolor=red,
+}
+% \pagestyle{plain}
+
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{3}
+
+\linespread{1}
+
+% \pagestyle{myheadings}
+
+\makeindex
+
+
+\begin{document}
+\nocite{*}
+\begin{titlepage}
+\sloppy
+
+\begin{center}
+BABE\c S BOLYAI UNIVERSITY, CLUJ NAPOCA, ROM\^ ANIA
+
+FACULTY OF MATHEMATICS AND COMPUTER SCIENCE
+
+\vspace{6cm}
+
+\Huge \textbf{An Analysis of Multitask Models for Histopathology}
+
+\vspace{1cm}
+
+\normalsize Data Mining Research Report
+
+\end{center}
+
+
+\vspace{4cm}
+
+\begin{flushright}
+\Large{\textbf{Student}}\\
+Alexandru Manole
+\end{flushright}
+
+\begin{flushright}
+\Large{\textbf{PhD Scientific Coordinator}}\\
+Prof. Dr. Laura Dio\c{s}an
+\end{flushright}
+
+\begin{flushright}
+\Large{\textbf{Course Coordinator}}\\
+Prof. Dr. Anca Andreica
+\end{flushright}
+
+
+\vspace{3cm}
+
+\begin{center}
+2023-2024
+\end{center}
+
+\end{titlepage}
+
+\pagenumbering{gobble}
+
+\begin{abstract}
+Artificial Intelligence has the potential to streamline and facilitate numerous processes in the medical field, increasing the quality of life for millions and potentially saving lives. One area which requires a lot of effort when it comes to diagnosing severe diseases like cancer is Histopathology. Recently, a modern learning strategy, Multi-task learning, was applied in Digital Histopathology in order to obtain relevant medical information from histological images. This paradigm is able to increase performance by learning multiple objectives simultaneously resulting in more general features. The resulting methods reduces overfitting and training times while increasing data efficiency making it a suitable choice for the high-dimensionality low sample size sets from the medical field. The aim of this report is to present novel multi-task approaches with applications in Histopathology, analyse them, showcase their advantages and drawbacks and identify possible future research directions.
+\end{abstract}
+
+
+\tableofcontents
+
+\newpage
+
+\listoffigures
+
+\newpage
+
+\setstretch{1.5}
+
+\newpage
+
+\pagenumbering{arabic}
+
+\include{chapters/1-Introduction}
+\include{chapters/2-RelatedWork}
+\include{chapters/3-InvestigatedApproach}
+\include{chapters/4-Discussion}
+\include{chapters/5-Conclusions}
+
+
+\bibliographystyle{plain}
+\bibliography{BibAll}
+
+\end{document}
+
