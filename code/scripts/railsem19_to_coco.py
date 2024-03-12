@@ -9,6 +9,9 @@ input_dataset_path = "D:/Mano/Rail/RailSem19/"
 output_dataset_path = "D:/Mano/coco/"
 
 DESIRED_CLASSES = ["switch-left", "switch-right"]
+CHANGE_BBOX = True
+RELATIV_INCREASE = 150
+ABSOLUT_INCREASE = 1.5
 
 def get_license():
     licenses = {}
@@ -137,6 +140,18 @@ def convert_railsem_to_coco():
                 class_no = DESIRED_CLASSES.index(bbox['label'])
                 railsem_bbox = bbox['boundingbox']
                 x1, y1, x2, y2 = railsem_bbox[0], railsem_bbox[1], railsem_bbox[2], railsem_bbox[3]
+                # Change BBox
+                if CHANGE_BBOX:
+                    w = x2 - x1 
+                    h = y2 - y1
+                    x0 = (x1 + x2) // 2
+                    y0 = (y1 + y2) // 2
+                    w = w * RELATIV_INCREASE + ABSOLUT_INCREASE
+                    h = h * RELATIV_INCREASE + ABSOLUT_INCREASE
+                    x1 = max(x0 - w // 2, 0)
+                    y1 = max(y0 - h // 2, 0)
+                    x2 = min(x0 + w // 2, 1920)
+                    y2 = min(y0 + h // 2, 1080)
                 bf_id += 1
                 annotation = {
                     'image_id' : im_id,
