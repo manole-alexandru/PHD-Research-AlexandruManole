@@ -1,0 +1,124 @@
+REFERENCES
+[1] Ahfaz Ahmed. A Huge List of Stable Diffusion Negative Prompts.
+https://huggingface.co/runwayml/stable-diffusion-v1-5. 4
+[2] Andrei-Robert Alexandrescu and Alexandru Manole. A dynamic approach
+for railway semantic segmentation. Studia Universitatis Babes, -
+Bolyai Informatica, pages 61–76, 2022. 1, 5, 7
+[3] Ms Aayushi Bansal, Dr Rewa Sharma, and Dr Mamta Kathuria. A
+systematic review on data scarcity problem in deep learning: solution
+and applications. ACM Computing Surveys (Csur), 54(10s):1–29, 2022.
+1
+[4] John Canny. A computational approach to edge detection. IEEE
+Transactions on pattern analysis and machine intelligence, (6):679–698,
+1986. 4, 6
+[5] Johanna Carlson and Lovisa Byman. Generation of synthetic traffic sign
+images using diffusion models. Dissertation, 2023. 4
+[6] Lee R Dice. Measures of the amount of ecologic association between
+species. Ecology, 26(3):297–302, 1945. 3
+[7] Peter Eigenschink, Thomas Reutterer, Stefan Vamosi, Ralf Vamosi,
+Chang Sun, and Klaudius Kalcher. Deep generative models for synthetic
+data: A survey. IEEE Access, 11:47304–47320, 2023. 1, 4
+[8] Virginia Fernandez, Walter Hugo Lopez Pinaya, Pedro Borges, Petru-
+Daniel Tudosiu, Mark S Graham, Tom Vercauteren, and M Jorge
+Cardoso. Can segmentation models be trained with fully synthetically
+generated data? In International Workshop on Simulation and Synthesis
+in Medical Imaging, pages 79–90. Springer, 2022. 3
+[9] Maayan Frid-Adar, Idit Diamant, Eyal Klang, Michal Amitai, Jacob
+Goldberger, and Hayit Greenspan. Gan-based synthetic medical image
+augmentation for increased cnn performance in liver lesion classification.
+Neurocomputing, 321:321–331, 2018. 3
+[10] Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David
+Warde-Farley, Sherjil Ozair, Aaron Courville, and Yoshua Bengio.
+Generative adversarial nets. Advances in neural information processing
+systems, 27, 2014. 3
+[11] David Ha, Andrew Dai, and Quoc V Le. Hypernetworks. arXiv preprint
+arXiv:1609.09106, 2016. 2
+[12] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard
+Nessler, and Sepp Hochreiter. Gans trained by a two time-scale
+update rule converge to a local nash equilibrium. Advances in neural
+information processing systems, 30, 2017. 1, 6
+[13] Paul Jaccard. The distribution of the flora in the alpine zone. 1. New
+phytologist, 11(2):37–50, 1912. 2, 6
+[14] Zeyinzi Jiang, Chaojie Mao, Yulin Pan, Zhen Han, and Jingfeng Zhang.
+Scedit: Efficient and controllable image diffusion generation via skip
+connection editing. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pages 8995–9004, 2024. 1
+[15] Justin Johnson, Alexandre Alahi, and Li Fei-Fei. Perceptual losses for
+real-time style transfer and super-resolution. In Computer Vision–ECCV
+2016: 14th European Conference, Amsterdam, The Netherlands, October
+11-14, 2016, Proceedings, Part II 14, pages 694–711. Springer, 2016. 2
+[16] Aghiles Kebaili, J´erˆome Lapuyade-Lahorgue, and Su Ruan. Deep
+learning approaches for data augmentation in medical imaging: a review.
+Journal of Imaging, 9(4):81, 2023. 3
+[17] Dipika Khullar, Yash Shah, Ninad Kulkarni, and Negin Sokhandan.
+Synthetic data generation for scarce road scene detection scenarios. In
+NeurIPS 2023 Workshop on Synthetic Data Generation with Generative
+AI, 2023. 4
+[18] Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. Blip-2:
+Bootstrapping language-image pre-training with frozen image encoders
+and large language models. In International conference on machine
+learning, pages 19730–19742. PMLR, 2023. 1, 3, 4, 5
+[19] Nan Liu, Shuang Li, Yilun Du, Antonio Torralba, and Joshua B
+Tenenbaum. Compositional visual generation with composable diffusion
+models. In European Conference on Computer Vision, pages 423–439.
+Springer, 2022. 4
+[20] Chong Mou, Xintao Wang, Liangbin Xie, Yanze Wu, Jian Zhang, Zhongang
+Qi, and Ying Shan. T2i-adapter: Learning adapters to dig out more
+controllable ability for text-to-image diffusion models. In Proceedings
+of the AAAI Conference on Artificial Intelligence, volume 38, pages
+4296–4304, 2024. 1
+[21] Taesung Park, Ming-Yu Liu, Ting-Chun Wang, and Jun-Yan Zhu.
+Semantic image synthesis with spatially-adaptive normalization. In
+Proceedings of the IEEE/CVF conference on computer vision and
+pattern recognition, pages 2337–2346, 2019. 3
+[22] Malsha V Perera and Vishal M Patel. Analyzing bias in diffusion-based
+face generation models. In 2023 IEEE International Joint Conference
+on Biometrics (IJCB), pages 1–10. IEEE, 2023. 2
+[23] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel
+Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin,
+Jack Clark, et al. Learning transferable visual models from natural
+language supervision. In International conference on machine learning,
+pages 8748–8763. PMLR, 2021. 4
+[24] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser,
+and Bj¨orn Ommer. High-resolution image synthesis with latent diffusion
+models. In Proceedings of the IEEE/CVF conference on computer vision
+and pattern recognition, pages 10684–10695, 2022. 2
+[25] Olaf Ronneberger, Philipp Fischer, and Thomas Brox. U-net: Convolutional
+networks for biomedical image segmentation. In Medical
+image computing and computer-assisted intervention–MICCAI 2015:
+18th international conference, Munich, Germany, October 5-9, 2015,
+proceedings, part III 18, pages 234–241. Springer, 2015. 7
+[26] Runway. Stable Diffusion v1-5 Model Card. https://huggingface.co/
+runwayml/stable-diffusion-v1-5. 2, 8
+[27] Christoph Schuhmann, Romain Beaumont, Richard Vencu, Cade Gordon,
+Ross Wightman, Mehdi Cherti, Theo Coombes, Aarush Katta,
+Clayton Mullis, Mitchell Wortsman, et al. Laion-5b: An open largescale
+dataset for training next generation image-text models. Advances
+in Neural Information Processing Systems, 35:25278–25294, 2022. 2
+[28] Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya
+Ganguli. Deep unsupervised learning using nonequilibrium thermodynamics.
+In International conference on machine learning, pages 2256–
+2265. PMLR, 2015. 2, 3
+[29] Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jon Shlens, and
+Zbigniew Wojna. Rethinking the inception architecture for computer
+vision. In Proceedings of the IEEE conference on computer vision and
+pattern recognition, pages 2818–2826, 2016. 6
+[30] Yoad Tewel, Yoav Shalev, Idan Schwartz, and Lior Wolf. Zerocap:
+Zero-shot image-to-text generation for visual-semantic arithmetic. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 17918–17928, 2022. 4
+[31] Steven Euijong Whang, Yuji Roh, Hwanjun Song, and Jae-Gil Lee. Data
+collection and quality challenges in deep learning: A data-centric ai
+perspective. The VLDB Journal, 32(4):791–813, 2023. 1
+[32] Saining Xie and Zhuowen Tu. Holistically-nested edge detection. In
+Proceedings of the IEEE international conference on computer vision,
+pages 1395–1403, 2015. 8
+[33] Oliver Zendel, Markus Murschitz, Marcel Zeilinger, Daniel Steininger,
+Sara Abbasi, and Csaba Beleznai. Railsem19: A dataset for semantic rail
+scene understanding. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition Workshops, pages 0–0, 2019.
+5, 7
+[34] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional
+control to text-to-image diffusion models. In Proceedings of the
+IEEE/CVF International Conference on Computer Vision, pages 3836–
+3847, 2023. 1, 2, 3, 4, 5, 6, 8
