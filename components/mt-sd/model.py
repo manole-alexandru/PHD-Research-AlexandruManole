@@ -180,7 +180,8 @@ def sample(model, ddpm: DDPM, shape, device, save_path="samples.png"):
     model.eval()
     T = ddpm.cfg.timesteps
     x = torch.randn(shape, device=device)
-    for i in tqdm(reversed(range(T)), total=T, desc="sampling"):
+    # silent sampling loop (no tqdm/progress printing)
+    for i in reversed(range(T)):
         t = torch.full((shape[0],), i, device=device, dtype=torch.long)
         beta_t = ddpm._extract(ddpm.betas, t, x.shape)
         sqrt_one_minus_ac = ddpm._extract(ddpm.sqrt_one_minus_alphas_cumprod, t, x.shape)
