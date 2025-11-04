@@ -31,3 +31,19 @@ def make_dataloader(name: str, batch_size: int, img_size: int, channels: int, va
     train_fid_loader = DataLoader(ds_full_for_train_fid, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
     return train_loader, val_loader, train_fid_loader
 
+
+def make_test_loader(name: str, batch_size: int, img_size: int, channels: int):
+    tfm = [transforms.Resize(img_size), transforms.ToTensor(), transforms.Normalize(0.5, 0.5)]
+    if channels == 3:
+        tfm = [transforms.Resize(img_size), transforms.ToTensor(),
+               transforms.Normalize((0.5,)*3, (0.5,)*3)]
+    tfm = transforms.Compose(tfm)
+    if name.lower() == "mnist":
+        ds_test = datasets.MNIST(root="./data", train=False, download=True, transform=tfm)
+    elif name.lower() in ["cifar10", "cifar"]:
+        name = "cifar10"
+        ds_test = datasets.CIFAR10(root="./data", train=False, download=True, transform=tfm)
+    else:
+        raise ValueError("Unsupported dataset. Use 'mnist' or 'cifar10'.")
+    test_loader = DataLoader(ds_test, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
+    return test_loader

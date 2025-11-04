@@ -77,3 +77,51 @@ class TinyUNet(nn.Module):
         else:
             return self.out_eps(u2)
 
+
+class DeepSupervisedUNet(nn.Module):
+    """
+    UNet with multiple epsilon heads for deep supervision.
+    Returns final eps in forward() for sampling compatibility, and
+    exposes forward_with_heads() to get intermediate predictions.
+    """
+    def __init__(self, in_channels=1, base=32, time_dim=128):
+        super().__init__()
+        self.time_dim = time_dim
+        self.time_mlp = nn.Sequential(
+            SinusoidalPositionEmbeddings(time_dim),
+            nn.Linear(time_dim, time_dim),
+            nn.SiLU(),
+        )
+        self.inc = ConvBlock(in_channels, base, time_dim)
+        self.down1 = nn.Sequential(nn.Conv2d(base, base, 3, stride=2, padding=1), nn.SiLU())
+        self.block1 = ConvBlock(base, base * 2, time_dim)
+        self.down2 = nn.Sequential(nn.Conv2d(base * 2, base * 2, 3, stride=2, padding=1), nn.SiLU())
+        self.block2 = ConvBlock(base * 2, base * 4, time_dim)
+        self.mid = ConvBlock(base * 4, base * 4, time_dim)
+        self.up1 = nn.ConvTranspose2d(base * 4, base * 2, 2, stride=2)
+        self.block_up1 = ConvBlock(base * 4, base * 2, time_dim)
+        self.up2 = nn.ConvTranspose2d(base * 2, base, 2, stride=2)
+        self.block_up2 = ConvBlock(base * 2, base, time_dim)
+
+        # Epsilon heads at multiple depths
+        self.head_eps_mid = nn.Conv2d(base * 4, in_channels, 1)
+        self.head_eps_up1 = nn.Conv2d(base * 2, in_channels, 1)
+        self.out_eps = nn.Conv2d(base, in_channels, 1)
+
+    def forward_with_heads(self, x, t):
+        t_emb = self.time_mlp(t)
+        x0 = self.inc(x, t_emb)
+        x1 = self.down1(x0); x1 = self.block1(x1, t_emb)
+        x2 = self.down2(x1); x2 = self.block2(x2, t_emb)
+        m = self.mid(x2, t_emb)
+        eps_mid = self.head_eps_mid(m)
+        u1 = self.up1(m); u1 = torch.cat([u1, x1], dim=1); u1 = self.block_up1(u1, t_emb)
+        eps_up1 = self.head_eps_up1(u1)
+        u2 = self.up2(u1); u2 = torch.cat([u2, x0], dim=1); u2 = self.block_up2(u2, t_emb)
+        eps_final = self.out_eps(u2)
+        return [eps_mid, eps_up1, eps_final]
+
+    def forward(self, x, t):
+        # Return only final eps for sampling compatibility
+        eps_final = self.forward_with_heads(x, t)[-1]
+        return {"eps": eps_final}

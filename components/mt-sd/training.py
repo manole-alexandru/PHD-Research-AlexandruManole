@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from models import TinyUNet
+from models import TinyUNet, DeepSupervisedUNet
 from diffusion import DDPM, DiffusionConfig
 from data_utils import make_dataloader
 from sampling import sample
@@ -14,12 +14,13 @@ from metrics_utils import (
 )
 
 
-def unified_loss(model, ddpm: DDPM, x0, t, multi_task: bool, w_x0=1.0, w_consistency=0.1):
+def unified_loss(model, ddpm: DDPM, x0, t, multi_task: bool, w_x0=1.0, w_consistency=0.1, multi_variant: str = "eps_x0_consistency"):
     x_t, noise = ddpm.q_sample(x0, t)
     preds = model(x_t, t.float())
     if not multi_task:
         loss_eps = F.mse_loss(preds, noise)
         return loss_eps, {"loss": loss_eps.detach()}
+    # Multi-task variants
     pred_eps = preds["eps"]; pred_x0 = preds["x0"]
     loss_eps = F.mse_loss(pred_eps, noise)
     loss_x0  = F.mse_loss(pred_x0, x0)
@@ -32,12 +33,44 @@ def unified_loss(model, ddpm: DDPM, x0, t, multi_task: bool, w_x0=1.0, w_consist
     cons2 = F.mse_loss(eps_from_x0.detach(), pred_eps)
     loss_cons = 0.5 * (cons1 + cons2)
 
-    total = loss_eps + w_x0 * loss_x0 + w_consistency * loss_cons
+    if multi_variant == "eps_x0_consistency":  # current default variant name
+        total = loss_eps + w_x0 * loss_x0 + w_consistency * loss_cons
+    else:
+        # fallback to default behavior if unknown variant
+        total = loss_eps + w_x0 * loss_x0 + w_consistency * loss_cons
+
     return total, {
         "loss": loss_eps.detach(),
         "loss_x0": loss_x0.detach(),
         "loss_cons": loss_cons.detach(),
         "loss_total": total.detach()
+    }
+
+
+def deep_supervised_loss(model: DeepSupervisedUNet, ddpm: DDPM, x0, t,
+                         w_aux_eps: float = 0.5, w_aux_x0: float = 0.5):
+    x_t, noise = ddpm.q_sample(x0, t)
+    eps_list = model.forward_with_heads(x_t, t.float())
+    # Use final head as main
+    eps_main = eps_list[-1]
+    loss_main = F.mse_loss(eps_main, noise)
+
+    # Auxiliary losses from intermediate heads
+    aux_eps = 0.0
+    aux_x0 = 0.0
+    sqrt_ac = ddpm._extract(ddpm.sqrt_alphas_cumprod, t, x_t.shape)
+    sqrt_om = ddpm._extract(ddpm.sqrt_one_minus_alphas_cumprod, t, x_t.shape)
+    for ep in eps_list[:-1]:
+        aux_eps = aux_eps + F.mse_loss(ep, noise)
+        x0_from_ep = (x_t - sqrt_om * ep) / (sqrt_ac + 1e-8)
+        aux_x0 = aux_x0 + F.mse_loss(x0_from_ep, x0)
+
+    total = loss_main + w_aux_eps * aux_eps + w_aux_x0 * aux_x0
+    return total, {
+        "loss": loss_main.detach(),
+        "loss_x0": aux_x0.detach(),
+        "loss_cons": aux_eps.detach(),
+        "loss_total": total.detach(),
     }
 
 
@@ -60,20 +93,26 @@ def train_unified(
     w_x0: float = 1.0,
     w_consistency: float = 0.1,
     experiment_dir: str | Path | None = None,
+    # Multi-task variant selector (for mode=="multi")
+    multi_variant: str = "eps_x0_consistency",
+    # Deep Supervised Diffusion weights (for mode=="dsd")
+    dsd_w_aux_eps: float = 0.5,
+    dsd_w_aux_x0: float = 0.5,
 ):
-    assert mode in ["single", "multi"]
+    assert mode in ["single", "multi", "dsd"]
     ds_key = "cifar10" if data.lower() in ["cifar10", "cifar"] else "mnist"
 
     base_dir = Path(experiment_dir) if experiment_dir is not None else (Path(save_root) / "experiment")
     images_dir = base_dir / "images"
     metrics_dir = base_dir / "metrics"
     fid_dir = base_dir / "fid" / f"{ds_key}_{mode}"
+    ckpt_dir = base_dir / "checkpoints"
     fid_train_real = fid_dir / "train_real"
     fid_train_fake = fid_dir / "train_fake"
     fid_val_real   = fid_dir / "val_real"
     fid_val_fake   = fid_dir / "val_fake"
     file_prefix = f"{ds_key}_{mode}"
-    for d in [images_dir, metrics_dir, fid_train_real, fid_train_fake, fid_val_real, fid_val_fake]:
+    for d in [images_dir, metrics_dir, fid_train_real, fid_train_fake, fid_val_real, fid_val_fake, ckpt_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -82,7 +121,10 @@ def train_unified(
 
     train_loader, val_loader, train_fid_loader = make_dataloader(ds_key, batch_size, img_size, channels, val_split=val_split)
 
-    model = TinyUNet(in_channels=channels, base=base, time_dim=time_dim, multi_task=(mode=="multi")).to(device)
+    if mode == "dsd":
+        model = DeepSupervisedUNet(in_channels=channels, base=base, time_dim=time_dim).to(device)
+    else:
+        model = TinyUNet(in_channels=channels, base=base, time_dim=time_dim, multi_task=(mode=="multi")).to(device)
     ddpm = DDPM(DiffusionConfig(timesteps=timesteps, beta_start=beta_start, beta_end=beta_end)).to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=lr)
 
@@ -90,6 +132,7 @@ def train_unified(
     tr_loss_main, tr_loss_x0, tr_loss_cons, tr_loss_total = [], [], [], []
     val_epochs, va_loss_main, va_loss_x0 = [], [], []
     fid_train_hist, fid_val_hist = [], []
+    best_val_loss, best_val_fid = float('inf'), float('inf')
 
     step = 0
     model.train()
@@ -98,14 +141,18 @@ def train_unified(
         for imgs, _ in pbar:
             imgs = imgs.to(device)
             t = torch.randint(0, ddpm.cfg.timesteps, (imgs.size(0),), device=device)
-            total, parts = unified_loss(model, ddpm, imgs, t, multi_task=(mode=="multi"),
-                                        w_x0=w_x0, w_consistency=w_consistency)
+            if mode == "dsd":
+                total, parts = deep_supervised_loss(model, ddpm, imgs, t,
+                                                    w_aux_eps=dsd_w_aux_eps, w_aux_x0=dsd_w_aux_x0)
+            else:
+                total, parts = unified_loss(model, ddpm, imgs, t, multi_task=(mode=="multi"),
+                                            w_x0=w_x0, w_consistency=w_consistency, multi_variant=multi_variant)
             optim.zero_grad(); total.backward(); optim.step()
 
             step += 1
             train_steps.append(step)
             tr_loss_main.append(float(parts["loss"]))
-            if mode == "multi":
+            if mode == "multi" or mode == "dsd":
                 tr_loss_x0.append(float(parts["loss_x0"]))
                 tr_loss_cons.append(float(parts["loss_cons"]))
                 tr_loss_total.append(float(parts["loss_total"]))
@@ -187,6 +234,35 @@ def train_unified(
         fid_train_hist.append(float(fid_train))
         fid_val_hist.append(float(fid_val))
 
+        # Save best checkpoints by validation loss and FID
+        current_val_loss = va_loss_main[-1]
+        if current_val_loss < best_val_loss:
+            best_val_loss = current_val_loss
+            torch.save({
+                'state_dict': model.state_dict(),
+                'mode': mode,
+                'ds_key': ds_key,
+                'base': base,
+                'time_dim': time_dim,
+                'channels': channels,
+                'timesteps': timesteps,
+                'beta_start': beta_start,
+                'beta_end': beta_end,
+            }, ckpt_dir / f"{file_prefix}_best_loss.pt")
+        if float(fid_val) < best_val_fid:
+            best_val_fid = float(fid_val)
+            torch.save({
+                'state_dict': model.state_dict(),
+                'mode': mode,
+                'ds_key': ds_key,
+                'base': base,
+                'time_dim': time_dim,
+                'channels': channels,
+                'timesteps': timesteps,
+                'beta_start': beta_start,
+                'beta_end': beta_end,
+            }, ckpt_dir / f"{file_prefix}_best_fid.pt")
+
         if mode == "multi":
             print(f"[val] epoch {epoch+1}: loss={va_loss_main[-1]:.6f} | loss_x0={va_loss_x0[-1]:.6f} | "
                   f"FID_train={fid_train:.2f} | FID_val={fid_val:.2f}")
@@ -249,7 +325,8 @@ def evaluate_mse_unified(model, ddpm: DDPM, data_loader, device, multi_task: boo
             tot_eps += mse_eps.item()
             tot_x0  += mse_x0.item()
         else:
-            eps = preds
+            # Handle tensor or dict with 'eps'
+            eps = preds["eps"] if isinstance(preds, dict) else preds
             mse_eps = F.mse_loss(eps, noise, reduction='sum')
             tot_eps += mse_eps.item()
         denom += imgs.numel()

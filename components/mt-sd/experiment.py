@@ -12,7 +12,12 @@ CUR_DIR = Path(__file__).parent
 if str(CUR_DIR) not in sys.path:
     sys.path.insert(0, str(CUR_DIR))
 
-from training import train_unified  # type: ignore
+from training import train_unified, evaluate_mse_unified  # type: ignore
+from data_utils import make_test_loader  # type: ignore
+from diffusion import DDPM, DiffusionConfig  # type: ignore
+from models import TinyUNet, DeepSupervisedUNet  # type: ignore
+from metrics_utils import denorm, dump_images, compute_fid  # type: ignore
+from sampling import sample  # type: ignore
 
 
 if __name__ == "__main__":
@@ -55,8 +60,9 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Warning: failed to write config.json: {e}")
 
-    # Single-task runs: MNIST and CIFAR10
+    # Runs: Single-task, Multi-task, and Deep Supervised Diffusion for each dataset
     for ds in ["mnist", "cifar10"]:
+        # Single-task
         train_unified(
             save_root=str(EXP_ROOT),
             experiment_dir=EXP_ROOT,
@@ -67,9 +73,7 @@ if __name__ == "__main__":
             n_sample=N_SAMPLE,
             sample_every=SAMPLE_EVERY,
         )
-
-    # Multi-task runs: MNIST and CIFAR10
-    for ds in ["mnist", "cifar10"]:
+        # Multi-task (named variant: eps_x0_consistency)
         train_unified(
             save_root=str(EXP_ROOT),
             experiment_dir=EXP_ROOT,
@@ -81,4 +85,156 @@ if __name__ == "__main__":
             sample_every=SAMPLE_EVERY,
             w_x0=cfg["W_X0"],
             w_consistency=cfg["W_CONSISTENCY"],
+            multi_variant="eps_x0_consistency",
         )
+        # Deep Supervised Diffusion
+        train_unified(
+            save_root=str(EXP_ROOT),
+            experiment_dir=EXP_ROOT,
+            mode="dsd",
+            data=ds,
+            epochs=EPOCHS,
+            timesteps=TIMESTEPS,
+            n_sample=N_SAMPLE,
+            sample_every=SAMPLE_EVERY,
+        )
+
+    # After all runs, create combined comparison plots (val loss and FID) per dataset
+    import csv
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    metrics_dir = EXP_ROOT / "metrics"
+
+    def _read_val_metrics(prefix: str):
+        path = metrics_dir / f"{prefix}_val_metrics.csv"
+        epochs, losses, fid_val = [], [], []
+        if not path.exists():
+            return epochs, losses, fid_val
+        with open(path, "r", newline="") as f:
+            r = csv.DictReader(f)
+            for row in r:
+                try:
+                    epochs.append(int(float(row.get("epoch", 0))))
+                    losses.append(float(row.get("loss", "nan")))
+                    if "fid_val" in row:
+                        fid_val.append(float(row.get("fid_val", "nan")))
+                except Exception:
+                    continue
+        return epochs, losses, fid_val
+
+    for ds in ["mnist", "cifar10"]:
+        prefixes = {
+            "single": f"{ds}_single",
+            "multi": f"{ds}_multi",
+            "dsd": f"{ds}_dsd",
+        }
+        series = {k: _read_val_metrics(v) for k, v in prefixes.items()}
+
+        # Val loss comparison
+        plt.figure()
+        for label, color in [("single", "tab:blue"), ("multi", "tab:orange"), ("dsd", "tab:green")]:
+            ep, loss, _ = series[label]
+            if ep and loss:
+                plt.plot(ep, loss, label=label)
+        plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss — {ds}"); plt.legend(); plt.tight_layout()
+        plt.savefig(metrics_dir / f"{ds}_compare_val_loss.png", dpi=150); plt.close()
+
+        # FID (val) comparison
+        plt.figure()
+        for label, color in [("single", "tab:blue"), ("multi", "tab:orange"), ("dsd", "tab:green")]:
+            ep, _, fidv = series[label]
+            if ep and fidv:
+                plt.plot(ep, fidv, label=label)
+        plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) — {ds}"); plt.legend(); plt.tight_layout()
+        plt.savefig(metrics_dir / f"{ds}_compare_fid_val.png", dpi=150); plt.close()
+
+    # Evaluate best checkpoints (by val loss and by val FID) on test set per dataset
+    results = []
+    ckpt_dir = EXP_ROOT / "checkpoints"
+    for ds in ["mnist", "cifar10"]:
+        ds_key = ds
+        channels = 1 if ds_key == "mnist" else 3
+        img_size = 28 if ds_key == "mnist" else 32
+        device = __import__('torch').device("cuda" if __import__('torch').cuda.is_available() else "cpu")
+        test_loader = make_test_loader(ds_key, batch_size=128, img_size=img_size, channels=channels)
+        for mode in ["single", "multi", "dsd"]:
+            file_prefix = f"{ds_key}_{mode}"
+            for tag in ["best_loss", "best_fid"]:
+                ckpt_path = ckpt_dir / f"{file_prefix}_{tag}.pt"
+                if not ckpt_path.exists():
+                    continue
+                import torch
+                payload = torch.load(ckpt_path, map_location="cpu")
+                # Build model per mode
+                if mode == "dsd":
+                    model = DeepSupervisedUNet(in_channels=channels, base=payload.get('base', 32), time_dim=payload.get('time_dim', 128)).to(device)
+                else:
+                    model = TinyUNet(in_channels=channels, base=payload.get('base', 32), time_dim=payload.get('time_dim', 128), multi_task=(mode=="multi")).to(device)
+                model.load_state_dict(payload['state_dict'])
+                model.eval()
+                ddpm = DDPM(DiffusionConfig(timesteps=payload.get('timesteps', 200), beta_start=payload.get('beta_start', 1e-4), beta_end=payload.get('beta_end', 0.02))).to(device)
+
+                # MSE on test set
+                metrics = evaluate_mse_unified(model, ddpm, test_loader, device, multi_task=(mode=="multi"))
+                mse_loss = float(metrics["loss"]) if metrics and ("loss" in metrics) else float('nan')
+
+                # FID on test set: prepare real test and fake samples
+                fid_eval_images = cfg.get("FID_EVAL_IMAGES", 1024)
+                # real
+                test_real_dir = EXP_ROOT / "fid" / f"{file_prefix}_test" / "real"
+                test_fake_dir = EXP_ROOT / "fid" / f"{file_prefix}_test" / "fake"
+                for d in [test_real_dir, test_fake_dir]:
+                    d.mkdir(parents=True, exist_ok=True)
+                    # cleanup previous
+                    for f in d.glob("*.png"): f.unlink()
+
+                collected = 0; imgs_accum = []
+                for imgs, _ in test_loader:
+                    imgs_accum.append(imgs)
+                    collected += imgs.size(0)
+                    if collected >= fid_eval_images: break
+                real_test = __import__('torch').cat(imgs_accum, dim=0)[:fid_eval_images]
+                real_test = denorm(real_test, channels)
+                dump_images(real_test, str(test_real_dir), prefix="real")
+
+                # fake
+                n_sample = cfg.get("N_SAMPLE", 64)
+                fake_list = []
+                while sum(x.size(0) for x in fake_list) < fid_eval_images:
+                    n = min(fid_eval_images - sum(x.size(0) for x in fake_list), n_sample)
+                    _, fb = sample(model, ddpm, shape=(n, channels, img_size, img_size), device=device, save_path=str((EXP_ROOT / "images") / "_tmp_test.png"))
+                    fake_list.append(denorm(fb.cpu(), channels))
+                fake_test = __import__('torch').cat(fake_list, dim=0)[:fid_eval_images]
+                dump_images(fake_test, str(test_fake_dir), prefix="fake")
+
+                fid_test = compute_fid(str(test_real_dir), str(test_fake_dir), device)
+                results.append({
+                    "dataset": ds_key,
+                    "mode": mode,
+                    "checkpoint": tag,
+                    "mse_loss": mse_loss,
+                    "fid_test": float(fid_test),
+                })
+
+    # Save results CSV and bar plots of FID per dataset
+    import csv as _csv
+    out_csv = metrics_dir / "test_summary.csv"
+    with open(out_csv, "w", newline="") as f:
+        writer = _csv.DictWriter(f, fieldnames=["dataset", "mode", "checkpoint", "mse_loss", "fid_test"])
+        writer.writeheader()
+        for row in results:
+            writer.writerow(row)
+
+    # Bar plots of FID per dataset
+    for ds in ["mnist", "cifar10"]:
+        items = [r for r in results if r["dataset"] == ds]
+        if not items:
+            continue
+        labels = [f"{r['mode']}_{r['checkpoint']}" for r in items]
+        values = [r['fid_test'] for r in items]
+        plt.figure(figsize=(10,4))
+        plt.bar(labels, values, color=["tab:blue" if 'single' in lb else ("tab:orange" if 'multi' in lb else "tab:green") for lb in labels])
+        plt.ylabel("FID (test)"); plt.title(f"Test FID — {ds}"); plt.xticks(rotation=30, ha='right'); plt.tight_layout()
+        plt.savefig(metrics_dir / f"{ds}_test_fid_bar.png", dpi=150); plt.close()
