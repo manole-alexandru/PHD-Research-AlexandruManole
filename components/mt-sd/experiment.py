@@ -17,7 +17,7 @@ from training import train_unified  # type: ignore
 
 if __name__ == "__main__":
     # Centralized constants (change once here)
-    EPOCHS = 10
+    EPOCHS = 50
     TIMESTEPS = 200
     N_SAMPLE = 64
     SAMPLE_EVERY = 500
