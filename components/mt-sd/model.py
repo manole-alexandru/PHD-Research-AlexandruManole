@@ -337,6 +337,79 @@ def save_curves_unified(
     plt.xlabel("epoch"); plt.ylabel("metric"); plt.title("Validation metrics"); plt.legend(); plt.tight_layout()
     plt.savefig(out_dir / "val_metrics.png", dpi=150); plt.close()
 
+# Prefixed-outputs variant: splits val loss vs FID and prefixes filenames
+def save_curves_unified_prefixed(
+    out_dir: Path,
+    train_steps,
+    train_loss_main, val_epochs, val_loss_main,
+    train_loss_x0=None, train_loss_cons=None, train_loss_total=None,
+    val_loss_x0=None,
+    fid_train=None, fid_val=None,
+    file_prefix: str | None = None,
+):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    prefix = (file_prefix + "_") if file_prefix else ""
+
+    # CSVs
+    with open(out_dir / f"{prefix}train_losses.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        header = ["step", "loss"]
+        if train_loss_x0 is not None: header += ["loss_x0"]
+        if train_loss_cons is not None: header += ["loss_cons"]
+        if train_loss_total is not None: header += ["loss_total"]
+        w.writerow(header)
+        for i, s in enumerate(train_steps):
+            row = [s, train_loss_main[i]]
+            if train_loss_x0 is not None: row += [train_loss_x0[i]]
+            if train_loss_cons is not None: row += [train_loss_cons[i]]
+            if train_loss_total is not None: row += [train_loss_total[i]]
+            w.writerow(row)
+
+    with open(out_dir / f"{prefix}val_metrics.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        header = ["epoch", "loss"]
+        if val_loss_x0 is not None: header += ["loss_x0"]
+        if fid_train is not None: header += ["fid_train"]
+        if fid_val is not None: header += ["fid_val"]
+        w.writerow(header)
+        for j, ep in enumerate(val_epochs):
+            row = [ep, val_loss_main[j]]
+            if val_loss_x0 is not None: row += [val_loss_x0[j]]
+            if fid_train is not None: row += [fid_train[j]]
+            if fid_val is not None: row += [fid_val[j]]
+            w.writerow(row)
+
+    # Plots: train loss main
+    plt.figure()
+    plt.plot(train_steps, train_loss_main, label="loss (raw)")
+    plt.plot(train_steps, ema_series(train_loss_main), label="loss (EMA)")
+    plt.xlabel("step"); plt.ylabel("loss"); plt.title("Training loss (main)"); plt.legend(); plt.tight_layout()
+    plt.savefig(out_dir / f"{prefix}training_loss_main.png", dpi=150); plt.close()
+
+    # Optional components
+    if train_loss_x0 is not None or train_loss_cons is not None or train_loss_total is not None:
+        plt.figure()
+        if train_loss_x0 is not None:   plt.plot(train_steps[:len(train_loss_x0)], ema_series(train_loss_x0), label="loss_x0 (EMA)")
+        if train_loss_cons is not None: plt.plot(train_steps[:len(train_loss_cons)], ema_series(train_loss_cons), label="loss_cons (EMA)")
+        if train_loss_total is not None:plt.plot(train_steps[:len(train_loss_total)], ema_series(train_loss_total), label="loss_total (EMA)")
+        plt.xlabel("step"); plt.ylabel("loss"); plt.title("Training loss components"); plt.legend(); plt.tight_layout()
+        plt.savefig(out_dir / f"{prefix}training_loss_components.png", dpi=150); plt.close()
+
+    # Validation losses
+    plt.figure()
+    plt.plot(val_epochs, val_loss_main, label="val loss (eps)")
+    if val_loss_x0 is not None: plt.plot(val_epochs, val_loss_x0, label="val loss_x0")
+    plt.xlabel("epoch"); plt.ylabel("loss"); plt.title("Validation losses"); plt.legend(); plt.tight_layout()
+    plt.savefig(out_dir / f"{prefix}val_losses.png", dpi=150); plt.close()
+
+    # FID curves
+    if fid_train is not None or fid_val is not None:
+        plt.figure()
+        if fid_train is not None: plt.plot(val_epochs, fid_train, label="FID (train)")
+        if fid_val is not None:   plt.plot(val_epochs, fid_val,   label="FID (val)")
+        plt.xlabel("epoch"); plt.ylabel("FID"); plt.title("FID over epochs"); plt.legend(); plt.tight_layout()
+        plt.savefig(out_dir / f"{prefix}fid.png", dpi=150); plt.close()
+
 # ---- Unified loss (single or multi) ----
 def unified_loss(model, ddpm: DDPM, x0, t, multi_task: bool, w_x0=1.0, w_consistency=0.1):
     """
@@ -392,19 +465,21 @@ def train_unified(
     fid_eval_images: int = 1024,        # FID pool size
     w_x0: float = 1.0,                  # only used in 'multi'
     w_consistency: float = 0.1,         # only used in 'multi'
+    experiment_dir: str | Path | None = None,
 ):
     assert mode in ["single", "multi"]
     ds_key = "cifar10" if data.lower() in ["cifar10", "cifar"] else "mnist"
 
-    # --- Paths ---
-    save_dir = Path(save_root) / mode / ds_key
-    images_dir = save_dir / "images"
-    metrics_dir = save_dir / "metrics"
-    fid_dir = save_dir / "fid"
+    # --- Paths (single experiment folder) ---
+    base_dir = Path(experiment_dir) if experiment_dir is not None else (Path(save_root) / "experiment")
+    images_dir = base_dir / "images"
+    metrics_dir = base_dir / "metrics"
+    fid_dir = base_dir / "fid" / f"{ds_key}_{mode}"
     fid_train_real = fid_dir / "train_real"
     fid_train_fake = fid_dir / "train_fake"
     fid_val_real   = fid_dir / "val_real"
     fid_val_fake   = fid_dir / "val_fake"
+    file_prefix = f"{ds_key}_{mode}"
     for d in [images_dir, metrics_dir, fid_train_real, fid_train_fake, fid_val_real, fid_val_fake]:
         d.mkdir(parents=True, exist_ok=True)
 
@@ -450,7 +525,7 @@ def train_unified(
 
             if step % sample_every == 0:
                 with torch.no_grad():
-                    grid_path = images_dir / f"samples_step{step}.png"
+                    grid_path = images_dir / f"{file_prefix}_samples_step{step}.png"
                     _path, _ = sample(
                         model, ddpm,
                         shape=(n_sample, channels, img_size, img_size),
@@ -464,9 +539,9 @@ def train_unified(
             va_loss_x0.append(float(val_metrics["loss_x0"]))
 
         # --- Prepare real images for FID (train & val) ---
-        # Clean dirs
+        # Clean only files for this dataset/mode to avoid mixing across runs
         for d in [fid_train_real, fid_train_fake, fid_val_real, fid_val_fake]:
-            for f in d.glob("*.png"): f.unlink()
+            for f in d.glob(f"{file_prefix}_*.png"): f.unlink()
 
         # Real train images
         collected = 0; imgs_accum = []
@@ -476,7 +551,7 @@ def train_unified(
             if collected >= fid_eval_images: break
         real_train = torch.cat(imgs_accum, dim=0)[:fid_eval_images]
         real_train = denorm(real_train, channels)
-        dump_images(real_train, str(fid_train_real), prefix="real")
+        dump_images(real_train, str(fid_train_real), prefix=f"{file_prefix}_real")
 
         # Real val images
         collected = 0; imgs_accum = []
@@ -486,13 +561,13 @@ def train_unified(
             if collected >= fid_eval_images: break
         real_val = torch.cat(imgs_accum, dim=0)[:fid_eval_images]
         real_val = denorm(real_val, channels)
-        dump_images(real_val, str(fid_val_real), prefix="real")
+        dump_images(real_val, str(fid_val_real), prefix=f"{file_prefix}_real")
 
         # --- Generate fake for train FID ---
         _, fake_batch = sample(
             model, ddpm,
             shape=(min(fid_eval_images, n_sample), channels, img_size, img_size),
-            device=device, save_path=str(images_dir / f"samples_trainfid_epoch{epoch+1}.png"),
+            device=device, save_path=str(images_dir / f"{file_prefix}_samples_trainfid_epoch{epoch+1}.png"),
         )
         fake_list = [denorm(fake_batch.cpu(), channels)]
         while sum(x.size(0) for x in fake_list) < fid_eval_images:
@@ -504,13 +579,13 @@ def train_unified(
             )
             fake_list.append(denorm(fb.cpu(), channels))
         fake_train = torch.cat(fake_list, dim=0)[:fid_eval_images]
-        dump_images(fake_train, str(fid_train_fake), prefix="fake")
+        dump_images(fake_train, str(fid_train_fake), prefix=f"{file_prefix}_fake")
 
         # --- Generate fake for val FID (fresh samples) ---
         _, fake_batch_val = sample(
             model, ddpm,
             shape=(min(fid_eval_images, n_sample), channels, img_size, img_size),
-            device=device, save_path=str(images_dir / f"samples_valfid_epoch{epoch+1}.png"),
+            device=device, save_path=str(images_dir / f"{file_prefix}_samples_valfid_epoch{epoch+1}.png"),
         )
         fake_list_val = [denorm(fake_batch_val.cpu(), channels)]
         while sum(x.size(0) for x in fake_list_val) < fid_eval_images:
@@ -522,7 +597,7 @@ def train_unified(
             )
             fake_list_val.append(denorm(fb.cpu(), channels))
         fake_val = torch.cat(fake_list_val, dim=0)[:fid_eval_images]
-        dump_images(fake_val, str(fid_val_fake), prefix="fake")
+        dump_images(fake_val, str(fid_val_fake), prefix=f"{file_prefix}_fake")
 
         # --- Compute FIDs ---
         fid_train = compute_fid(str(fid_train_real), str(fid_train_fake), device)
@@ -539,7 +614,7 @@ def train_unified(
                   f"FID_train={fid_train:.2f} | FID_val={fid_val:.2f}")
 
         # Save curves/CSVs incrementally
-        save_curves_unified(
+        save_curves_unified_prefixed(
             metrics_dir,
             train_steps=train_steps,
             train_loss_main=tr_loss_main,
@@ -551,6 +626,7 @@ def train_unified(
             val_loss_x0=(va_loss_x0 if mode=="multi" else None),
             fid_train=fid_train_hist,
             fid_val=fid_val_hist,
+            file_prefix=file_prefix,
         )
 
     # Final sample grid
@@ -558,12 +634,12 @@ def train_unified(
         path, _ = sample(
             model, ddpm,
             shape=(n_sample, channels, img_size, img_size),
-            device=device, save_path=str(images_dir / "samples_final.png"),
+            device=device, save_path=str(images_dir / f"{file_prefix}_samples_final.png"),
         )
     print(f"Saved final samples to {path}")
 
     # Final save (redundant)
-    save_curves_unified(
+    save_curves_unified_prefixed(
         metrics_dir,
         train_steps=train_steps,
         train_loss_main=tr_loss_main,
@@ -575,29 +651,75 @@ def train_unified(
         val_loss_x0=(va_loss_x0 if mode=="multi" else None),
         fid_train=fid_train_hist,
         fid_val=fid_val_hist,
+        file_prefix=file_prefix,
     )
 
 # ---- Run the requested experiments ----
 if __name__ == "__main__":
-    # You can mount Drive in Colab if desired, then point save_root there.
-    SAVE_ROOT = "/content/drive/MyDrive/prototypes/tiny_ddpm_mt/"
+    # Centralized constants (change once here)
+    EPOCHS = 10
+    TIMESTEPS = 200
+    N_SAMPLE = 64
+    SAMPLE_EVERY = 500
+    EXP_NO = 1  # experiment number/id
 
-    # 1) Single-task MNIST
-    train_unified(
-        save_root=SAVE_ROOT, mode="single", data="mnist",
-        epochs=10, timesteps=200, n_sample=64, sample_every=500,
-    )
+    # Single experiment folder for all runs
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    EXP_ROOT = Path("runs") / f"experiment-{EXP_NO}-{timestamp}"
+    (EXP_ROOT / "images").mkdir(parents=True, exist_ok=True)
+    (EXP_ROOT / "metrics").mkdir(parents=True, exist_ok=True)
+    (EXP_ROOT / "fid").mkdir(parents=True, exist_ok=True)
 
-    # 2) Single-task CIFAR10
-    train_unified(
-        save_root=SAVE_ROOT, mode="single", data="cifar10",
-        epochs=10, timesteps=200, n_sample=64, sample_every=500,
-    )
+    # Save config to experiment folder
+    cfg = {
+        "EXP_NO": EXP_NO,
+        "EPOCHS": EPOCHS,
+        "TIMESTEPS": TIMESTEPS,
+        "N_SAMPLE": N_SAMPLE,
+        "SAMPLE_EVERY": SAMPLE_EVERY,
+        "BATCH_SIZE": 128,
+        "LR": 2e-4,
+        "BETA_START": 1e-4,
+        "BETA_END": 0.02,
+        "BASE": 32,
+        "TIME_DIM": 128,
+        "VAL_SPLIT": 0.05,
+        "FID_EVAL_IMAGES": 1024,
+        "W_X0": 1.0,
+        "W_CONSISTENCY": 0.1,
+    }
+    try:
+        import json
+        with open(EXP_ROOT / "config.json", "w") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception as e:
+        print(f"Warning: failed to write config.json: {e}")
 
-    # 3) Multi-task MNIST and CIFAR10 (separate folders)
+    # Single-task runs: MNIST and CIFAR10
     for ds in ["mnist", "cifar10"]:
         train_unified(
-            save_root=SAVE_ROOT, mode="multi", data=ds,
-            epochs=10, timesteps=200, n_sample=64, sample_every=500,
-            w_x0=1.0, w_consistency=0.1,
+            save_root=str(EXP_ROOT),
+            experiment_dir=EXP_ROOT,
+            mode="single",
+            data=ds,
+            epochs=EPOCHS,
+            timesteps=TIMESTEPS,
+            n_sample=N_SAMPLE,
+            sample_every=SAMPLE_EVERY,
+        )
+
+    # Multi-task runs: MNIST and CIFAR10
+    for ds in ["mnist", "cifar10"]:
+        train_unified(
+            save_root=str(EXP_ROOT),
+            experiment_dir=EXP_ROOT,
+            mode="multi",
+            data=ds,
+            epochs=EPOCHS,
+            timesteps=TIMESTEPS,
+            n_sample=N_SAMPLE,
+            sample_every=SAMPLE_EVERY,
+            w_x0=cfg["W_X0"],
+            w_consistency=cfg["W_CONSISTENCY"],
         )
