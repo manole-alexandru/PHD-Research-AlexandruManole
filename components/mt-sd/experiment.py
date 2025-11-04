@@ -23,9 +23,10 @@ if __name__ == "__main__":
     SAMPLE_EVERY = 500
     EXP_NO = 1  # experiment number/id
 
-    # Single experiment folder for all runs
+    # Single experiment folder for all runs (HARDCODED base path)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    EXP_ROOT = Path("runs") / f"experiment-{EXP_NO}-{timestamp}"
+    EXP_BASE = Path("/content/drive/MyDrive/prototypes/mtsd_exp")
+    EXP_ROOT = EXP_BASE / f"experiment-{EXP_NO}-{timestamp}"
     (EXP_ROOT / "images").mkdir(parents=True, exist_ok=True)
     (EXP_ROOT / "metrics").mkdir(parents=True, exist_ok=True)
     (EXP_ROOT / "fid").mkdir(parents=True, exist_ok=True)
@@ -81,4 +82,3 @@ if __name__ == "__main__":
             w_x0=cfg["W_X0"],
             w_consistency=cfg["W_CONSISTENCY"],
         )
-
