@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime
 import sys
 import json
+import argparse
 
 # Make sibling modules importable when running this file directly
 CUR_DIR = Path(__file__).parent
@@ -21,12 +22,18 @@ from sampling import sample  # type: ignore
 
 
 if __name__ == "__main__":
+    # CLI args
+    parser = argparse.ArgumentParser(description="Run diffusion experiments")
+    parser.add_argument("--with-dsd", action="store_true", help="Include Deep Supervised Diffusion runs")
+    args = parser.parse_args()
+    WITH_DSD = bool(args.with_dsd)
+
     # Centralized constants (change once here)
-    EPOCHS = 5
+    EPOCHS = 50
     TIMESTEPS = 200
     N_SAMPLE = 64
     SAMPLE_EVERY = 500
-    EXP_NO = 2  # experiment number/id
+    EXP_NO = 1  # experiment number/id
 
     # Single experiment folder for all runs (HARDCODED base path)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -53,6 +60,7 @@ if __name__ == "__main__":
         "FID_EVAL_IMAGES": 1024,
         "W_X0": 1.0,
         "W_CONSISTENCY": 0.1,
+        "WITH_DSD": WITH_DSD,
     }
     try:
         with open(EXP_ROOT / "config.json", "w") as f:
@@ -60,9 +68,19 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Warning: failed to write config.json: {e}")
 
-    # Runs: Single-task, Multi-task, and Deep Supervised Diffusion for each dataset
+    # Runs: Single-task, Multi-task, and optional Deep Supervised Diffusion for each dataset
     for ds in ["mnist", "cifar10"]:
-
+        # Single-task
+        train_unified(
+            save_root=str(EXP_ROOT),
+            experiment_dir=EXP_ROOT,
+            mode="single",
+            data=ds,
+            epochs=EPOCHS,
+            timesteps=TIMESTEPS,
+            n_sample=N_SAMPLE,
+            sample_every=SAMPLE_EVERY,
+        )
         # Multi-task (named variant: eps_x0_consistency)
         train_unified(
             save_root=str(EXP_ROOT),
@@ -77,32 +95,18 @@ if __name__ == "__main__":
             w_consistency=cfg["W_CONSISTENCY"],
             multi_variant="eps_x0_consistency",
         )
-
-        # Single-task
-        train_unified(
-            save_root=str(EXP_ROOT),
-            experiment_dir=EXP_ROOT,
-            mode="single",
-            data=ds,
-            epochs=EPOCHS,
-            timesteps=TIMESTEPS,
-            n_sample=N_SAMPLE,
-            sample_every=SAMPLE_EVERY,
-        )
-        
-        '''
-        # Deep Supervised Diffusion
-        train_unified(
-            save_root=str(EXP_ROOT),
-            experiment_dir=EXP_ROOT,
-            mode="dsd",
-            data=ds,
-            epochs=EPOCHS,
-            timesteps=TIMESTEPS,
-            n_sample=N_SAMPLE,
-            sample_every=SAMPLE_EVERY,
-        )
-        '''
+        # Deep Supervised Diffusion (optional)
+        if WITH_DSD:
+            train_unified(
+                save_root=str(EXP_ROOT),
+                experiment_dir=EXP_ROOT,
+                mode="dsd",
+                data=ds,
+                epochs=EPOCHS,
+                timesteps=TIMESTEPS,
+                n_sample=N_SAMPLE,
+                sample_every=SAMPLE_EVERY,
+            )
 
     # After all runs, create combined comparison plots (val loss and FID) per dataset
     import csv
@@ -160,31 +164,35 @@ if __name__ == "__main__":
         plt.title(f"Val Loss and FID - {ds}"); plt.tight_layout()
         plt.savefig(metrics_dir / f"{ds}_single_vs_multi_val_loss_fid.png", dpi=150); plt.close()
 
-    # Exit before legacy comparison plotting below
+    # Separate comparisons (val loss and FID), optionally including DSD
     for ds in ["mnist", "cifar10"]:
         prefixes = {
             "single": f"{ds}_single",
             "multi": f"{ds}_multi",
-            # "dsd": f"{ds}_dsd",
         }
+        if WITH_DSD:
+            prefixes["dsd"] = f"{ds}_dsd"
         series = {k: _read_val_metrics(v) for k, v in prefixes.items()}
 
         # Val loss comparison
         plt.figure()
-        for label, color in [("single", "tab:blue"), ("multi", "tab:orange"), ("dsd", "tab:green")]:
-            ep, loss, _ = series[label]
+        labels_colors = [("single", "tab:blue"), ("multi", "tab:orange")]
+        if WITH_DSD:
+            labels_colors.append(("dsd", "tab:green"))
+        for label, color in labels_colors:
+            ep, loss, _ = series.get(label, ([], [], []))
             if ep and loss:
-                plt.plot(ep, loss, label=label)
-        plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss — {ds}"); plt.legend(); plt.tight_layout()
+                plt.plot(ep, loss, label=label, color=color)
+        plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss - {ds}"); plt.legend(); plt.tight_layout()
         plt.savefig(metrics_dir / f"{ds}_compare_val_loss.png", dpi=150); plt.close()
 
         # FID (val) comparison
         plt.figure()
-        for label, color in [("single", "tab:blue"), ("multi", "tab:orange"), ("dsd", "tab:green")]:
-            ep, _, fidv = series[label]
+        for label, color in labels_colors:
+            ep, _, fidv = series.get(label, ([], [], []))
             if ep and fidv:
-                plt.plot(ep, fidv, label=label)
-        plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) — {ds}"); plt.legend(); plt.tight_layout()
+                plt.plot(ep, fidv, label=label, color=color)
+        plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) - {ds}"); plt.legend(); plt.tight_layout()
         plt.savefig(metrics_dir / f"{ds}_compare_fid_val.png", dpi=150); plt.close()
 
     # Evaluate best checkpoints (by val loss and by val FID) on test set per dataset
@@ -196,7 +204,8 @@ if __name__ == "__main__":
         img_size = 28 if ds_key == "mnist" else 32
         device = __import__('torch').device("cuda" if __import__('torch').cuda.is_available() else "cpu")
         test_loader = make_test_loader(ds_key, batch_size=128, img_size=img_size, channels=channels)
-        for mode in ["single", "multi", "dsd"]:
+        modes = ["single", "multi"] + (["dsd"] if WITH_DSD else [])
+        for mode in modes:
             file_prefix = f"{ds_key}_{mode}"
             for tag in ["best_loss", "best_fid"]:
                 ckpt_path = ckpt_dir / f"{file_prefix}_{tag}.pt"
@@ -273,5 +282,9 @@ if __name__ == "__main__":
         values = [r['fid_test'] for r in items]
         plt.figure(figsize=(10,4))
         plt.bar(labels, values, color=["tab:blue" if 'single' in lb else ("tab:orange" if 'multi' in lb else "tab:green") for lb in labels])
-        plt.ylabel("FID (test)"); plt.title(f"Test FID — {ds}"); plt.xticks(rotation=30, ha='right'); plt.tight_layout()
+        plt.ylabel("FID (test)"); plt.title(f"Test FID - {ds}"); plt.xticks(rotation=30, ha='right'); plt.tight_layout()
         plt.savefig(metrics_dir / f"{ds}_test_fid_bar.png", dpi=150); plt.close()
+
+
+# TODO: After single-task, multi-task and dds were trained, plot the train losses and val losses in the same plot + fid evolutions
+
