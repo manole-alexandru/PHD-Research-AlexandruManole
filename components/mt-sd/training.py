@@ -162,13 +162,16 @@ def train_unified(
                 pbar.set_postfix({"loss": f"{parts['loss']:.4f}"})
 
             if step % sample_every == 0:
-                with torch.no_grad():
-                    grid_path = images_dir / f"{file_prefix}_samples_step{step}.png"
-                    _path, _ = sample(
-                        model, ddpm,
-                        shape=(n_sample, channels, img_size, img_size),
-                        device=device, save_path=str(grid_path),
-                    )
+                try:
+                    with torch.no_grad():
+                        grid_path = images_dir / f"{file_prefix}_samples_step{step}.png"
+                        _path, _ = sample(
+                            model, ddpm,
+                            shape=(n_sample, channels, img_size, img_size),
+                            device=device, save_path=str(grid_path),
+                        )
+                except Exception as e:
+                    print(f"[warn|sample-grid|{mode}|{ds_key}] step={step} failed: {e}")
 
         val_metrics = evaluate_mse_unified(model, ddpm, val_loader, device, multi_task=(mode=="multi"))
         va_loss_main.append(float(val_metrics["loss"]))
@@ -176,7 +179,11 @@ def train_unified(
             va_loss_x0.append(float(val_metrics["loss_x0"]))
 
         for d in [fid_train_real, fid_train_fake, fid_val_real, fid_val_fake]:
-            for f in d.glob(f"{file_prefix}_*.png"): f.unlink()
+            for f in d.glob(f"{file_prefix}_*.png"): 
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
 
         collected = 0; imgs_accum = []
         for imgs, _ in train_fid_loader:
@@ -196,42 +203,46 @@ def train_unified(
         real_val = denorm(real_val, channels)
         dump_images(real_val, str(fid_val_real), prefix=f"{file_prefix}_real")
 
-        _, fake_batch = sample(
-            model, ddpm,
-            shape=(min(fid_eval_images, n_sample), channels, img_size, img_size),
-            device=device, save_path=str(images_dir / f"{file_prefix}_samples_trainfid_epoch{epoch+1}.png"),
-        )
-        fake_list = [denorm(fake_batch.cpu(), channels)]
-        while sum(x.size(0) for x in fake_list) < fid_eval_images:
-            _, fb = sample(
+        try:
+            _, fake_batch = sample(
                 model, ddpm,
-                shape=(min(fid_eval_images - sum(x.size(0) for x in fake_list), n_sample),
-                       channels, img_size, img_size),
-                device=device, save_path=str(images_dir / "_tmp.png"),
+                shape=(min(fid_eval_images, n_sample), channels, img_size, img_size),
+                device=device, save_path=str(images_dir / f"{file_prefix}_samples_trainfid_epoch{epoch+1}.png"),
             )
-            fake_list.append(denorm(fb.cpu(), channels))
-        fake_train = torch.cat(fake_list, dim=0)[:fid_eval_images]
-        dump_images(fake_train, str(fid_train_fake), prefix=f"{file_prefix}_fake")
+            fake_list = [denorm(fake_batch.cpu(), channels)]
+            while sum(x.size(0) for x in fake_list) < fid_eval_images:
+                _, fb = sample(
+                    model, ddpm,
+                    shape=(min(fid_eval_images - sum(x.size(0) for x in fake_list), n_sample),
+                           channels, img_size, img_size),
+                    device=device, save_path=str(images_dir / "_tmp.png"),
+                )
+                fake_list.append(denorm(fb.cpu(), channels))
+            fake_train = torch.cat(fake_list, dim=0)[:fid_eval_images]
+            dump_images(fake_train, str(fid_train_fake), prefix=f"{file_prefix}_fake")
 
-        _, fake_batch_val = sample(
-            model, ddpm,
-            shape=(min(fid_eval_images, n_sample), channels, img_size, img_size),
-            device=device, save_path=str(images_dir / f"{file_prefix}_samples_valfid_epoch{epoch+1}.png"),
-        )
-        fake_list_val = [denorm(fake_batch_val.cpu(), channels)]
-        while sum(x.size(0) for x in fake_list_val) < fid_eval_images:
-            _, fb = sample(
+            _, fake_batch_val = sample(
                 model, ddpm,
-                shape=(min(fid_eval_images - sum(x.size(0) for x in fake_list_val), n_sample),
-                       channels, img_size, img_size),
-                device=device, save_path=str(images_dir / "_tmp2.png"),
+                shape=(min(fid_eval_images, n_sample), channels, img_size, img_size),
+                device=device, save_path=str(images_dir / f"{file_prefix}_samples_valfid_epoch{epoch+1}.png"),
             )
-            fake_list_val.append(denorm(fb.cpu(), channels))
-        fake_val = torch.cat(fake_list_val, dim=0)[:fid_eval_images]
-        dump_images(fake_val, str(fid_val_fake), prefix=f"{file_prefix}_fake")
+            fake_list_val = [denorm(fake_batch_val.cpu(), channels)]
+            while sum(x.size(0) for x in fake_list_val) < fid_eval_images:
+                _, fb = sample(
+                    model, ddpm,
+                    shape=(min(fid_eval_images - sum(x.size(0) for x in fake_list_val), n_sample),
+                           channels, img_size, img_size),
+                    device=device, save_path=str(images_dir / "_tmp2.png"),
+                )
+                fake_list_val.append(denorm(fb.cpu(), channels))
+            fake_val = torch.cat(fake_list_val, dim=0)[:fid_eval_images]
+            dump_images(fake_val, str(fid_val_fake), prefix=f"{file_prefix}_fake")
 
-        fid_train = compute_fid(str(fid_train_real), str(fid_train_fake), device)
-        fid_val   = compute_fid(str(fid_val_real),   str(fid_val_fake),   device)
+            fid_train = compute_fid(str(fid_train_real), str(fid_train_fake), device)
+            fid_val   = compute_fid(str(fid_val_real),   str(fid_val_fake),   device)
+        except Exception as e:
+            print(f"[warn|fid|{mode}|{ds_key}] epoch={epoch+1} FID pipeline failed: {e}")
+            fid_train, fid_val = float('nan'), float('nan')
         fid_train_hist.append(float(fid_train))
         fid_val_hist.append(float(fid_val))
 
