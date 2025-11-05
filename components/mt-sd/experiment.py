@@ -22,11 +22,11 @@ from sampling import sample  # type: ignore
 
 if __name__ == "__main__":
     # Centralized constants (change once here)
-    EPOCHS = 50
+    EPOCHS = 30
     TIMESTEPS = 200
     N_SAMPLE = 64
     SAMPLE_EVERY = 500
-    EXP_NO = 1  # experiment number/id
+    EXP_NO = 2  # experiment number/id
 
     # Single experiment folder for all runs (HARDCODED base path)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
