@@ -22,7 +22,7 @@ from sampling import sample  # type: ignore
 
 if __name__ == "__main__":
     # Centralized constants (change once here)
-    EPOCHS = 30
+    EPOCHS = 5
     TIMESTEPS = 200
     N_SAMPLE = 64
     SAMPLE_EVERY = 500
