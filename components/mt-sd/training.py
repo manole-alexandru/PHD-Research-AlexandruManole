@@ -114,6 +114,7 @@ def train_unified(
     file_prefix = f"{ds_key}_{mode}"
     for d in [images_dir, metrics_dir, fid_train_real, fid_train_fake, fid_val_real, fid_val_fake, ckpt_dir]:
         d.mkdir(parents=True, exist_ok=True)
+    print(f"[paths|{mode}|{ds_key}] images={images_dir} metrics={metrics_dir} fid_dir={fid_dir} ckpts={ckpt_dir}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     channels = 1 if ds_key == "mnist" else 3
@@ -284,6 +285,7 @@ def train_unified(
             fid_val=fid_val_hist,
             file_prefix=file_prefix,
         )
+        print(f"[saved|{mode}|{ds_key}] metrics CSV/plots updated in {metrics_dir} with prefix '{file_prefix}_*'")
 
     with torch.no_grad():
         path, _ = sample(
@@ -307,6 +309,7 @@ def train_unified(
         fid_val=fid_val_hist,
         file_prefix=file_prefix,
     )
+    print(f"[final|{mode}|{ds_key}] metrics CSV/plots written in {metrics_dir} with prefix '{file_prefix}_*'")
 
 
 @torch.no_grad()

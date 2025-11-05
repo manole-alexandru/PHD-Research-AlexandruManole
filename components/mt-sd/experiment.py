@@ -62,17 +62,7 @@ if __name__ == "__main__":
 
     # Runs: Single-task, Multi-task, and Deep Supervised Diffusion for each dataset
     for ds in ["mnist", "cifar10"]:
-        # Single-task
-        train_unified(
-            save_root=str(EXP_ROOT),
-            experiment_dir=EXP_ROOT,
-            mode="single",
-            data=ds,
-            epochs=EPOCHS,
-            timesteps=TIMESTEPS,
-            n_sample=N_SAMPLE,
-            sample_every=SAMPLE_EVERY,
-        )
+
         # Multi-task (named variant: eps_x0_consistency)
         train_unified(
             save_root=str(EXP_ROOT),
@@ -87,6 +77,20 @@ if __name__ == "__main__":
             w_consistency=cfg["W_CONSISTENCY"],
             multi_variant="eps_x0_consistency",
         )
+
+        # Single-task
+        train_unified(
+            save_root=str(EXP_ROOT),
+            experiment_dir=EXP_ROOT,
+            mode="single",
+            data=ds,
+            epochs=EPOCHS,
+            timesteps=TIMESTEPS,
+            n_sample=N_SAMPLE,
+            sample_every=SAMPLE_EVERY,
+        )
+        
+        '''
         # Deep Supervised Diffusion
         train_unified(
             save_root=str(EXP_ROOT),
@@ -98,6 +102,7 @@ if __name__ == "__main__":
             n_sample=N_SAMPLE,
             sample_every=SAMPLE_EVERY,
         )
+        '''
 
     # After all runs, create combined comparison plots (val loss and FID) per dataset
     import csv
@@ -124,11 +129,43 @@ if __name__ == "__main__":
                     continue
         return epochs, losses, fid_val
 
+    # Combined plots of val loss and val FID (single vs multi)
     for ds in ["mnist", "cifar10"]:
         prefixes = {
             "single": f"{ds}_single",
             "multi": f"{ds}_multi",
-            "dsd": f"{ds}_dsd",
+        }
+        series = {k: _read_val_metrics(v) for k, v in prefixes.items()}
+
+        fig, ax1 = plt.subplots()
+        for label, color in [("single", "tab:blue"), ("multi", "tab:orange")]:
+            ep, loss, _ = series.get(label, ([], [], []))
+            if ep and loss:
+                ax1.plot(ep, loss, label=f"{label} loss", color=color, linestyle="-")
+        ax1.set_xlabel("epoch"); ax1.set_ylabel("val loss")
+
+        ax2 = ax1.twinx()
+        for label, color in [("single", "tab:blue"), ("multi", "tab:orange")]:
+            ep, _, fidv = series.get(label, ([], [], []))
+            if ep and fidv:
+                ax2.plot(ep, fidv, label=f"{label} FID", color=color, linestyle="--")
+        ax2.set_ylabel("FID (val)")
+
+        lines, labels = [], []
+        for ax in (ax1, ax2):
+            lns, lbls = ax.get_legend_handles_labels()
+            lines += lns; labels += lbls
+        ax1.legend(lines, labels, loc="best")
+
+        plt.title(f"Val Loss and FID - {ds}"); plt.tight_layout()
+        plt.savefig(metrics_dir / f"{ds}_single_vs_multi_val_loss_fid.png", dpi=150); plt.close()
+
+    # Exit before legacy comparison plotting below
+    for ds in ["mnist", "cifar10"]:
+        prefixes = {
+            "single": f"{ds}_single",
+            "multi": f"{ds}_multi",
+            # "dsd": f"{ds}_dsd",
         }
         series = {k: _read_val_metrics(v) for k, v in prefixes.items()}
 
