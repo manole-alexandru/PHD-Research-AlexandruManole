@@ -27,9 +27,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run diffusion experiments on MNIST/CIFAR10")
     parser.add_argument(
         "--data",
-        choices=["mnist", "cifar10", "cifar", "both"],
+        choices=["mnist", "cifar10", "cifar", "both", "none"],
         default="both",
-        help="Select dataset(s) to run: mnist, cifar10, or both",
+        help="Select dataset(s) to train: mnist, cifar10, both, or none (eval-only)",
     )
     parser.add_argument(
         "--exp-dir",
@@ -49,6 +49,8 @@ if __name__ == "__main__":
         DATASETS = ["cifar10"]
     elif data_choice == "mnist":
         DATASETS = ["mnist"]
+    elif data_choice == "none":
+        DATASETS = []
     else:
         DATASETS = ["cifar10", "mnist"]
 
