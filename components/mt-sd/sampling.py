@@ -31,5 +31,9 @@ def sample(model, ddpm, shape, device, save_path: str = "samples.png") -> Tuple[
         x = posterior_mean + torch.sqrt(posterior_var) * noise
     grid = vutils.make_grid((x.clamp(-1, 1) + 1) * 0.5, nrow=int(math.sqrt(shape[0])))
     vutils.save_image(grid, save_path)
+    try:
+        p = Path(save_path)
+        assert p.exists() and p.stat().st_size > 0, f"Sample grid not saved: {save_path}"
+    except Exception as e:
+        raise AssertionError(f"Failed to save sample grid '{save_path}': {e}")
     return save_path, x.detach().cpu()
-

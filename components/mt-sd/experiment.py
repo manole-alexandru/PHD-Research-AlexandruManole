@@ -7,6 +7,7 @@ from datetime import datetime
 import sys
 import json
 import argparse
+import torch
 
 # Make sibling modules importable when running this file directly
 CUR_DIR = Path(__file__).parent
@@ -22,14 +23,9 @@ from sampling import sample  # type: ignore
 
 
 if __name__ == "__main__":
-    # CLI args
-    parser = argparse.ArgumentParser(description="Run diffusion experiments")
-    parser.add_argument("--with-dsd", action="store_true", help="Include Deep Supervised Diffusion runs")
-    args = parser.parse_args()
-    WITH_DSD = bool(args.with_dsd)
-
     # Centralized constants (change once here)
-    EPOCHS = 50
+    EPOCHS = 5
+    WITH_DSD = False
     TIMESTEPS = 200
     N_SAMPLE = 64
     SAMPLE_EVERY = 500
@@ -63,13 +59,15 @@ if __name__ == "__main__":
         "WITH_DSD": WITH_DSD,
     }
     try:
-        with open(EXP_ROOT / "config.json", "w") as f:
+        cfg_path = EXP_ROOT / "config.json"
+        with open(cfg_path, "w") as f:
             json.dump(cfg, f, indent=2)
+        assert cfg_path.exists() and cfg_path.stat().st_size > 0, f"Config not saved: {cfg_path}"
     except Exception as e:
         print(f"Warning: failed to write config.json: {e}")
 
     # Runs: Single-task, Multi-task, and optional Deep Supervised Diffusion for each dataset
-    for ds in ["mnist", "cifar10"]:
+    for ds in ["cifar10", "mnist"]:
         # Single-task
         train_unified(
             save_root=str(EXP_ROOT),
@@ -162,7 +160,12 @@ if __name__ == "__main__":
         ax1.legend(lines, labels, loc="best")
 
         plt.title(f"Val Loss and FID - {ds}"); plt.tight_layout()
-        plt.savefig(metrics_dir / f"{ds}_single_vs_multi_val_loss_fid.png", dpi=150); plt.close()
+        out_plot = metrics_dir / f"{ds}_single_vs_multi_val_loss_fid.png"
+        plt.savefig(out_plot, dpi=150); plt.close()
+        try:
+            assert out_plot.exists() and out_plot.stat().st_size > 0, f"Plot not saved: {out_plot}"
+        except Exception as e:
+            raise AssertionError(f"Failed to save combined plot '{out_plot}': {e}")
 
     # Separate comparisons (val loss and FID), optionally including DSD
     for ds in ["mnist", "cifar10"]:
@@ -184,7 +187,12 @@ if __name__ == "__main__":
             if ep and loss:
                 plt.plot(ep, loss, label=label, color=color)
         plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss - {ds}"); plt.legend(); plt.tight_layout()
-        plt.savefig(metrics_dir / f"{ds}_compare_val_loss.png", dpi=150); plt.close()
+        out_val_loss = metrics_dir / f"{ds}_compare_val_loss.png"
+        plt.savefig(out_val_loss, dpi=150); plt.close()
+        try:
+            assert out_val_loss.exists() and out_val_loss.stat().st_size > 0, f"Plot not saved: {out_val_loss}"
+        except Exception as e:
+            raise AssertionError(f"Failed to save val-loss comparison plot '{out_val_loss}': {e}")
 
         # FID (val) comparison
         plt.figure()
@@ -193,7 +201,12 @@ if __name__ == "__main__":
             if ep and fidv:
                 plt.plot(ep, fidv, label=label, color=color)
         plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) - {ds}"); plt.legend(); plt.tight_layout()
-        plt.savefig(metrics_dir / f"{ds}_compare_fid_val.png", dpi=150); plt.close()
+        out_fid_val = metrics_dir / f"{ds}_compare_fid_val.png"
+        plt.savefig(out_fid_val, dpi=150); plt.close()
+        try:
+            assert out_fid_val.exists() and out_fid_val.stat().st_size > 0, f"Plot not saved: {out_fid_val}"
+        except Exception as e:
+            raise AssertionError(f"Failed to save FID-val comparison plot '{out_fid_val}': {e}")
 
     # Evaluate best checkpoints (by val loss and by val FID) on test set per dataset
     results = []
@@ -202,7 +215,7 @@ if __name__ == "__main__":
         ds_key = ds
         channels = 1 if ds_key == "mnist" else 3
         img_size = 28 if ds_key == "mnist" else 32
-        device = __import__('torch').device("cuda" if __import__('torch').cuda.is_available() else "cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         test_loader = make_test_loader(ds_key, batch_size=128, img_size=img_size, channels=channels)
         modes = ["single", "multi"] + (["dsd"] if WITH_DSD else [])
         for mode in modes:
@@ -211,7 +224,6 @@ if __name__ == "__main__":
                 ckpt_path = ckpt_dir / f"{file_prefix}_{tag}.pt"
                 if not ckpt_path.exists():
                     continue
-                import torch
                 payload = torch.load(ckpt_path, map_location="cpu")
                 # Build model per mode
                 if mode == "dsd":
@@ -241,7 +253,7 @@ if __name__ == "__main__":
                     imgs_accum.append(imgs)
                     collected += imgs.size(0)
                     if collected >= fid_eval_images: break
-                real_test = __import__('torch').cat(imgs_accum, dim=0)[:fid_eval_images]
+                real_test = torch.cat(imgs_accum, dim=0)[:fid_eval_images]
                 real_test = denorm(real_test, channels)
                 dump_images(real_test, str(test_real_dir), prefix="real")
 
@@ -252,7 +264,7 @@ if __name__ == "__main__":
                     n = min(fid_eval_images - sum(x.size(0) for x in fake_list), n_sample)
                     _, fb = sample(model, ddpm, shape=(n, channels, img_size, img_size), device=device, save_path=str((EXP_ROOT / "images") / "_tmp_test.png"))
                     fake_list.append(denorm(fb.cpu(), channels))
-                fake_test = __import__('torch').cat(fake_list, dim=0)[:fid_eval_images]
+                fake_test = torch.cat(fake_list, dim=0)[:fid_eval_images]
                 dump_images(fake_test, str(test_fake_dir), prefix="fake")
 
                 fid_test = compute_fid(str(test_real_dir), str(test_fake_dir), device)
@@ -272,6 +284,10 @@ if __name__ == "__main__":
         writer.writeheader()
         for row in results:
             writer.writerow(row)
+    try:
+        assert out_csv.exists() and out_csv.stat().st_size > 0, f"Test summary CSV not saved: {out_csv}"
+    except Exception as e:
+        raise AssertionError(f"Failed to save test summary CSV '{out_csv}': {e}")
 
     # Bar plots of FID per dataset
     for ds in ["mnist", "cifar10"]:
@@ -283,8 +299,12 @@ if __name__ == "__main__":
         plt.figure(figsize=(10,4))
         plt.bar(labels, values, color=["tab:blue" if 'single' in lb else ("tab:orange" if 'multi' in lb else "tab:green") for lb in labels])
         plt.ylabel("FID (test)"); plt.title(f"Test FID - {ds}"); plt.xticks(rotation=30, ha='right'); plt.tight_layout()
-        plt.savefig(metrics_dir / f"{ds}_test_fid_bar.png", dpi=150); plt.close()
+        out_bar = metrics_dir / f"{ds}_test_fid_bar.png"
+        plt.savefig(out_bar, dpi=150); plt.close()
+        try:
+            assert out_bar.exists() and out_bar.stat().st_size > 0, f"Bar plot not saved: {out_bar}"
+        except Exception as e:
+            raise AssertionError(f"Failed to save test FID bar plot '{out_bar}': {e}")
 
 
 # TODO: After single-task, multi-task and dds were trained, plot the train losses and val losses in the same plot + fid evolutions
-

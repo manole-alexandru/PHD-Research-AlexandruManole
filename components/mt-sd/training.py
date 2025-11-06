@@ -250,6 +250,7 @@ def train_unified(
         current_val_loss = va_loss_main[-1]
         if current_val_loss < best_val_loss:
             best_val_loss = current_val_loss
+            _ckpt_loss = ckpt_dir / f"{file_prefix}_best_loss.pt"
             torch.save({
                 'state_dict': model.state_dict(),
                 'mode': mode,
@@ -260,9 +261,14 @@ def train_unified(
                 'timesteps': timesteps,
                 'beta_start': beta_start,
                 'beta_end': beta_end,
-            }, ckpt_dir / f"{file_prefix}_best_loss.pt")
+            }, _ckpt_loss)
+            try:
+                assert _ckpt_loss.exists() and _ckpt_loss.stat().st_size > 0, f"Checkpoint not saved: {_ckpt_loss}"
+            except Exception as e:
+                raise AssertionError(f"Failed to save best-loss checkpoint '{_ckpt_loss}': {e}")
         if float(fid_val) < best_val_fid:
             best_val_fid = float(fid_val)
+            _ckpt_fid = ckpt_dir / f"{file_prefix}_best_fid.pt"
             torch.save({
                 'state_dict': model.state_dict(),
                 'mode': mode,
@@ -273,7 +279,11 @@ def train_unified(
                 'timesteps': timesteps,
                 'beta_start': beta_start,
                 'beta_end': beta_end,
-            }, ckpt_dir / f"{file_prefix}_best_fid.pt")
+            }, _ckpt_fid)
+            try:
+                assert _ckpt_fid.exists() and _ckpt_fid.stat().st_size > 0, f"Checkpoint not saved: {_ckpt_fid}"
+            except Exception as e:
+                raise AssertionError(f"Failed to save best-fid checkpoint '{_ckpt_fid}': {e}")
 
         if mode == "multi":
             print(f"[val] epoch {epoch+1}: loss={va_loss_main[-1]:.6f} | loss_x0={va_loss_x0[-1]:.6f} | "
@@ -304,6 +314,11 @@ def train_unified(
             shape=(n_sample, channels, img_size, img_size),
             device=device, save_path=str(images_dir / f"{file_prefix}_samples_final.png"),
         )
+        try:
+            p = Path(path)
+            assert p.exists() and p.stat().st_size > 0, f"Final sample not saved: {path}"
+        except Exception as e:
+            raise AssertionError(f"Failed to save final sample '{path}': {e}")
     print(f"Saved final samples to {path}")
 
     save_curves_unified_prefixed(

@@ -12,7 +12,12 @@ def dump_images(tensor_bchw, out_dir: str, prefix: str = "img"):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     for i, img in enumerate(tensor_bchw):
-        vutils.save_image(img, out / f"{prefix}_{i:05d}.png")
+        fp = out / f"{prefix}_{i:05d}.png"
+        vutils.save_image(img, fp)
+        try:
+            assert fp.exists() and fp.stat().st_size > 0, f"Image not saved: {fp}"
+        except Exception as e:
+            raise AssertionError(f"Failed to save image '{fp}': {e}")
 
 
 def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
@@ -51,7 +56,8 @@ def save_curves_unified_prefixed(
     prefix = (file_prefix + "_") if file_prefix else ""
 
     # CSVs
-    with open(out_dir / f"{prefix}train_losses.csv", "w", newline="") as f:
+    train_csv = out_dir / f"{prefix}train_losses.csv"
+    with open(train_csv, "w", newline="") as f:
         w = csv.writer(f)
         header = ["step", "loss"]
         if train_loss_x0 is not None: header += ["loss_x0"]
@@ -65,7 +71,8 @@ def save_curves_unified_prefixed(
             if train_loss_total is not None: row += [train_loss_total[i]]
             w.writerow(row)
 
-    with open(out_dir / f"{prefix}val_metrics.csv", "w", newline="") as f:
+    val_csv = out_dir / f"{prefix}val_metrics.csv"
+    with open(val_csv, "w", newline="") as f:
         w = csv.writer(f)
         header = ["epoch", "loss"]
         if val_loss_x0 is not None: header += ["loss_x0"]
@@ -80,11 +87,23 @@ def save_curves_unified_prefixed(
             w.writerow(row)
 
     # Plots: train loss main
+    # Ensure CSVs were written
+    try:
+        assert train_csv.exists() and train_csv.stat().st_size > 0, f"Train CSV not saved: {train_csv}"
+        assert val_csv.exists() and val_csv.stat().st_size > 0, f"Val CSV not saved: {val_csv}"
+    except Exception as e:
+        raise AssertionError(f"Failed writing CSV metrics: {e}")
+
     plt.figure()
     plt.plot(train_steps, train_loss_main, label="loss (raw)")
     plt.plot(train_steps, ema_series(train_loss_main), label="loss (EMA)")
     plt.xlabel("step"); plt.ylabel("loss"); plt.title("Training loss (main)"); plt.legend(); plt.tight_layout()
-    plt.savefig(out_dir / f"{prefix}training_loss_main.png", dpi=150); plt.close()
+    pl_main = out_dir / f"{prefix}training_loss_main.png"
+    plt.savefig(pl_main, dpi=150); plt.close()
+    try:
+        assert pl_main.exists() and pl_main.stat().st_size > 0, f"Plot not saved: {pl_main}"
+    except Exception as e:
+        raise AssertionError(f"Failed saving training loss main plot: {e}")
 
     # Optional components
     if train_loss_x0 is not None or train_loss_cons is not None or train_loss_total is not None:
@@ -93,14 +112,24 @@ def save_curves_unified_prefixed(
         if train_loss_cons is not None: plt.plot(train_steps[:len(train_loss_cons)], ema_series(train_loss_cons), label="loss_cons (EMA)")
         if train_loss_total is not None:plt.plot(train_steps[:len(train_loss_total)], ema_series(train_loss_total), label="loss_total (EMA)")
         plt.xlabel("step"); plt.ylabel("loss"); plt.title("Training loss components"); plt.legend(); plt.tight_layout()
-        plt.savefig(out_dir / f"{prefix}training_loss_components.png", dpi=150); plt.close()
+        pl_comp = out_dir / f"{prefix}training_loss_components.png"
+        plt.savefig(pl_comp, dpi=150); plt.close()
+        try:
+            assert pl_comp.exists() and pl_comp.stat().st_size > 0, f"Plot not saved: {pl_comp}"
+        except Exception as e:
+            raise AssertionError(f"Failed saving training loss components plot: {e}")
 
     # Validation losses
     plt.figure()
     plt.plot(val_epochs, val_loss_main, label="val loss (eps)")
     if val_loss_x0 is not None: plt.plot(val_epochs, val_loss_x0, label="val loss_x0")
     plt.xlabel("epoch"); plt.ylabel("loss"); plt.title("Validation losses"); plt.legend(); plt.tight_layout()
-    plt.savefig(out_dir / f"{prefix}val_losses.png", dpi=150); plt.close()
+    pl_val = out_dir / f"{prefix}val_losses.png"
+    plt.savefig(pl_val, dpi=150); plt.close()
+    try:
+        assert pl_val.exists() and pl_val.stat().st_size > 0, f"Plot not saved: {pl_val}"
+    except Exception as e:
+        raise AssertionError(f"Failed saving validation losses plot: {e}")
 
     # FID curves
     if fid_train is not None or fid_val is not None:
@@ -108,7 +137,12 @@ def save_curves_unified_prefixed(
         if fid_train is not None: plt.plot(val_epochs, fid_train, label="FID (train)")
         if fid_val is not None:   plt.plot(val_epochs, fid_val,   label="FID (val)")
         plt.xlabel("epoch"); plt.ylabel("FID"); plt.title("FID over epochs"); plt.legend(); plt.tight_layout()
-        plt.savefig(out_dir / f"{prefix}fid.png", dpi=150); plt.close()
+        pl_fid = out_dir / f"{prefix}fid.png"
+        plt.savefig(pl_fid, dpi=150); plt.close()
+        try:
+            assert pl_fid.exists() and pl_fid.stat().st_size > 0, f"Plot not saved: {pl_fid}"
+        except Exception as e:
+            raise AssertionError(f"Failed saving FID plot: {e}")
 
 
 def denorm(x, channels):
@@ -116,4 +150,3 @@ def denorm(x, channels):
     if channels == 1:
         x = x.repeat(1, 3, 1, 1)
     return x
-
