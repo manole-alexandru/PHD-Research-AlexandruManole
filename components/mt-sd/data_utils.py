@@ -26,6 +26,7 @@ def make_dataloader(name: str, batch_size: int, img_size: int, channels: int, va
     train_size = len(ds_train) - val_size
     train_ds, val_ds = torch.utils.data.random_split(ds_train, [train_size, val_size])
 
+    # Colab defaults: a couple of workers and pinned memory for CUDA
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
     val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
     train_fid_loader = DataLoader(ds_full_for_train_fid, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)

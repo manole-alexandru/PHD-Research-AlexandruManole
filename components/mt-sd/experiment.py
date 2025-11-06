@@ -23,6 +23,35 @@ from sampling import sample  # type: ignore
 
 
 if __name__ == "__main__":
+    # CLI parameters
+    parser = argparse.ArgumentParser(description="Run diffusion experiments on MNIST/CIFAR10")
+    parser.add_argument(
+        "--data",
+        choices=["mnist", "cifar10", "cifar", "both"],
+        default="both",
+        help="Select dataset(s) to run: mnist, cifar10, or both",
+    )
+    parser.add_argument(
+        "--exp-dir",
+        type=str,
+        default=None,
+        help="Optional experiment root directory to reuse across runs (e.g., to aggregate MNIST/CIFAR).",
+    )
+    parser.add_argument(
+        "--eval",
+        action="store_true",
+        help="After training, perform post-train evaluation and plotting based only on saved files.",
+    )
+    args = parser.parse_args()
+
+    data_choice = args.data.lower()
+    if data_choice in ("cifar10", "cifar"):
+        DATASETS = ["cifar10"]
+    elif data_choice == "mnist":
+        DATASETS = ["mnist"]
+    else:
+        DATASETS = ["cifar10", "mnist"]
+
     # Centralized constants (change once here)
     EPOCHS = 5
     WITH_DSD = False
@@ -31,10 +60,13 @@ if __name__ == "__main__":
     SAMPLE_EVERY = 500
     EXP_NO = 1  # experiment number/id
 
-    # Single experiment folder for all runs (HARDCODED base path)
+    # Experiment folder: allow reusing a fixed directory via --exp-dir for cross-run aggregation
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     EXP_BASE = Path("/content/drive/MyDrive/prototypes/mtsd_exp")
-    EXP_ROOT = EXP_BASE / f"experiment-{EXP_NO}-{timestamp}"
+    if args.exp_dir:
+        EXP_ROOT = Path(args.exp_dir)
+    else:
+        EXP_ROOT = EXP_BASE / f"experiment-{EXP_NO}" # -{timestamp}"
     (EXP_ROOT / "images").mkdir(parents=True, exist_ok=True)
     (EXP_ROOT / "metrics").mkdir(parents=True, exist_ok=True)
     (EXP_ROOT / "fid").mkdir(parents=True, exist_ok=True)
@@ -67,7 +99,7 @@ if __name__ == "__main__":
         print(f"Warning: failed to write config.json: {e}")
 
     # Runs: Single-task, Multi-task, and optional Deep Supervised Diffusion for each dataset
-    for ds in ["cifar10", "mnist"]:
+    for ds in DATASETS:
         # Single-task
         train_unified(
             save_root=str(EXP_ROOT),
@@ -107,6 +139,8 @@ if __name__ == "__main__":
             )
 
     # After all runs, create combined comparison plots (val loss and FID) per dataset
+    # Note: this section operates solely on saved files (metrics CSVs, checkpoints),
+    #       not on in-memory variables, to support aggregating results across multiple runs.
     import csv
     import matplotlib
     matplotlib.use("Agg")
@@ -131,7 +165,12 @@ if __name__ == "__main__":
                     continue
         return epochs, losses, fid_val
 
+    # If --eval is not set, skip all post-train evaluation steps
+    if not args.eval:
+        sys.exit(0)
+
     # Combined plots of val loss and val FID (single vs multi)
+    # Always consider both datasets here; functions handle missing files gracefully.
     for ds in ["mnist", "cifar10"]:
         prefixes = {
             "single": f"{ds}_single",
@@ -239,7 +278,8 @@ if __name__ == "__main__":
                 mse_loss = float(metrics["loss"]) if metrics and ("loss" in metrics) else float('nan')
 
                 # FID on test set: prepare real test and fake samples
-                fid_eval_images = cfg.get("FID_EVAL_IMAGES", 1024)
+                # Use fixed defaults (file-based evaluation; do not depend on in-run variables)
+                fid_eval_images = 1024
                 # real
                 test_real_dir = EXP_ROOT / "fid" / f"{file_prefix}_test" / "real"
                 test_fake_dir = EXP_ROOT / "fid" / f"{file_prefix}_test" / "fake"
@@ -258,7 +298,7 @@ if __name__ == "__main__":
                 dump_images(real_test, str(test_real_dir), prefix="real")
 
                 # fake
-                n_sample = cfg.get("N_SAMPLE", 64)
+                n_sample = 64
                 fake_list = []
                 while sum(x.size(0) for x in fake_list) < fid_eval_images:
                     n = min(fid_eval_images - sum(x.size(0) for x in fake_list), n_sample)
@@ -290,7 +330,7 @@ if __name__ == "__main__":
         raise AssertionError(f"Failed to save test summary CSV '{out_csv}': {e}")
 
     # Bar plots of FID per dataset
-    for ds in ["mnist", "cifar10"]:
+    for ds in DATASETS:
         items = [r for r in results if r["dataset"] == ds]
         if not items:
             continue

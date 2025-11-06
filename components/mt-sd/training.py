@@ -337,6 +337,21 @@ def train_unified(
     )
     print(f"[final|{mode}|{ds_key}] metrics CSV/plots written in {metrics_dir} with prefix '{file_prefix}_*'")
 
+    # Proactively release GPU memory and DataLoader workers between runs
+    try:
+        del train_loader, val_loader, train_fid_loader
+    except Exception:
+        pass
+    try:
+        del model, ddpm, optim
+    except Exception:
+        pass
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
 
 @torch.no_grad()
 def evaluate_mse_unified(model, ddpm: DDPM, data_loader, device, multi_task: bool):
