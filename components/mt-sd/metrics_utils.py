@@ -47,6 +47,7 @@ def save_curves_unified_prefixed(
     out_dir: Path,
     train_steps,
     train_loss_main, val_epochs, val_loss_main,
+    train_loss_eps=None,
     train_loss_x0=None, train_loss_cons=None, train_loss_total=None,
     val_loss_x0=None,
     fid_train=None, fid_val=None,
@@ -60,12 +61,15 @@ def save_curves_unified_prefixed(
     with open(train_csv, "w", newline="") as f:
         w = csv.writer(f)
         header = ["step", "loss"]
+        # Optionally include an explicit loss_eps column (duplicates main loss for clarity)
+        if train_loss_eps is not None: header += ["loss_eps"]
         if train_loss_x0 is not None: header += ["loss_x0"]
         if train_loss_cons is not None: header += ["loss_cons"]
         if train_loss_total is not None: header += ["loss_total"]
         w.writerow(header)
         for i, s in enumerate(train_steps):
             row = [s, train_loss_main[i]]
+            if train_loss_eps is not None: row += [train_loss_eps[i]]
             if train_loss_x0 is not None: row += [train_loss_x0[i]]
             if train_loss_cons is not None: row += [train_loss_cons[i]]
             if train_loss_total is not None: row += [train_loss_total[i]]
@@ -106,8 +110,9 @@ def save_curves_unified_prefixed(
         raise AssertionError(f"Failed saving training loss main plot: {e}")
 
     # Optional components
-    if train_loss_x0 is not None or train_loss_cons is not None or train_loss_total is not None:
+    if (train_loss_eps is not None) or (train_loss_x0 is not None) or (train_loss_cons is not None) or (train_loss_total is not None):
         plt.figure()
+        if train_loss_eps is not None:  plt.plot(train_steps[:len(train_loss_eps)],  ema_series(train_loss_eps),  label="loss_eps (EMA)")
         if train_loss_x0 is not None:   plt.plot(train_steps[:len(train_loss_x0)], ema_series(train_loss_x0), label="loss_x0 (EMA)")
         if train_loss_cons is not None: plt.plot(train_steps[:len(train_loss_cons)], ema_series(train_loss_cons), label="loss_cons (EMA)")
         if train_loss_total is not None:plt.plot(train_steps[:len(train_loss_total)], ema_series(train_loss_total), label="loss_total (EMA)")
