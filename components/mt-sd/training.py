@@ -134,17 +134,20 @@ class UnifiedTrainer:
 
     def _make_epoch_fid_dirs(self, epoch_idx: int):
         """Create per-epoch FID directories and return them.
-        Structure: fid/{file_prefix}/epoch_{k}/{train|val}_{real|fake}
+        Train dir: fid/{file_prefix}/epoch_{k}/...
+        Val dir:   fid/{file_prefix}/fid_validation_epoch{k}/...
         """
-        ep_dir = self.fid_dir / f"epoch_{epoch_idx+1}"
-        tr_real = ep_dir / "train_real"
-        tr_fake = ep_dir / "train_fake"
-        va_real = ep_dir / "val_real"
-        va_fake = ep_dir / "val_fake"
+        tr_dir = self.fid_dir / f"epoch_{epoch_idx+1}"
+        va_dir = self.fid_dir / f"fid_validation_epoch{epoch_idx+1}"
+        tr_real = tr_dir / "train_real"
+        tr_fake = tr_dir / "train_fake"
+        va_real = va_dir / "real"
+        va_fake = va_dir / "fake"
         for d in [tr_real, tr_fake, va_real, va_fake]:
             d.mkdir(parents=True, exist_ok=True)
         return {
-            'epoch_dir': ep_dir,
+            'train_epoch_dir': tr_dir,
+            'val_epoch_dir': va_dir,
             'train_real': tr_real,
             'train_fake': tr_fake,
             'val_real': va_real,
@@ -303,10 +306,12 @@ class UnifiedTrainer:
                 self._collect_fake_sets(epoch, fid_dirs)
                 fid_train = compute_fid(str(fid_dirs['train_real']), str(fid_dirs['train_fake']), self.device)
                 fid_val   = compute_fid(str(fid_dirs['val_real']),   str(fid_dirs['val_fake']),   self.device)
-                try:
-                    shutil.rmtree(fid_dirs['epoch_dir'], ignore_errors=True)
-                except Exception:
-                    pass
+                # Clean up both train and validation epoch folders
+                for ep in ['train_epoch_dir', 'val_epoch_dir']:
+                    try:
+                        shutil.rmtree(fid_dirs.get(ep, Path("")), ignore_errors=True)
+                    except Exception:
+                        pass
             except Exception as e:
                 print(f"[warn|fid|{self.cfg.mode}|{self.ds_key}] epoch={epoch+1} FID pipeline failed: {e}")
                 fid_train, fid_val = float('nan'), float('nan')

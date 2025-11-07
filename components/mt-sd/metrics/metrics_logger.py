@@ -7,6 +7,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import time
+try:
+    import torch
+except Exception:
+    torch = None  # type: ignore
 
 
 def ema_series(values: Sequence[float], decay: float = 0.98):
@@ -24,6 +28,26 @@ class MetricsLogger:
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.prefix = (file_prefix + "_") if file_prefix else ""
+        # Small device check (GPU availability)
+        self.gpu_available = bool(torch and hasattr(torch, 'cuda') and torch.cuda.is_available())
+        try:
+            if self.gpu_available:
+                name = torch.cuda.get_device_name(0)
+                print(f"[metrics|device] GPU detected: {name}")
+            else:
+                print("[metrics|device] GPU not detected; using CPU")
+        except Exception:
+            # Be silent on environments without CUDA runtime
+            pass
+
+    @staticmethod
+    def is_gpu_available() -> bool:
+        """Return True if a CUDA GPU is available."""
+        try:
+            import torch as _torch  # local import in case module-level failed
+            return _torch.cuda.is_available()
+        except Exception:
+            return False
 
     # --------------- CSV ---------------
     def write_train_csv(
