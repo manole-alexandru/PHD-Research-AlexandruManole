@@ -138,6 +138,13 @@ def train_unified(
     step = 0
     model.train()
     for epoch in range(epochs):
+        # Accumulate training losses over the whole epoch for logging
+        epoch_batches = 0
+        epoch_loss_main = 0.0
+        epoch_loss_x0 = 0.0
+        epoch_loss_cons = 0.0
+        epoch_loss_total = 0.0
+
         pbar = tqdm(train_loader, desc=f"[{mode}|{ds_key}] epoch {epoch+1}/{epochs}")
         for imgs, _ in pbar:
             imgs = imgs.to(device)
@@ -153,13 +160,17 @@ def train_unified(
             step += 1
             train_steps.append(step)
             tr_loss_main.append(float(parts["loss"]))
+            # Accumulate epoch losses
+            epoch_batches += 1
+            epoch_loss_main += float(parts["loss"])
             if mode == "multi" or mode == "dsd":
                 tr_loss_x0.append(float(parts["loss_x0"]))
                 tr_loss_cons.append(float(parts["loss_cons"]))
                 tr_loss_total.append(float(parts["loss_total"]))
-                pbar.set_postfix({"loss": f"{parts['loss']:.4f}", "tot": f"{parts['loss_total']:.4f}"})
-            else:
-                pbar.set_postfix({"loss": f"{parts['loss']:.4f}"})
+                epoch_loss_x0 += float(parts["loss_x0"]) 
+                epoch_loss_cons += float(parts["loss_cons"]) 
+                epoch_loss_total += float(parts["loss_total"]) 
+            # Do not log per-batch losses; we will report epoch averages after the loop
 
             if step % sample_every == 0:
                 try:
@@ -172,6 +183,21 @@ def train_unified(
                         )
                 except Exception as e:
                     print(f"[warn|sample-grid|{mode}|{ds_key}] step={step} failed: {e}")
+
+        # Compute and log epoch-average training loss
+        denom = max(1, epoch_batches)
+        avg_train_loss = epoch_loss_main / denom
+        if mode == "multi" or mode == "dsd":
+            avg_train_loss_x0 = epoch_loss_x0 / denom
+            avg_train_loss_cons = epoch_loss_cons / denom
+            avg_train_loss_total = epoch_loss_total / denom
+            print(
+                f"[train] epoch {epoch+1}: loss={avg_train_loss:.6f} | "
+                f"loss_x0={avg_train_loss_x0:.6f} | loss_cons={avg_train_loss_cons:.6f} | "
+                f"loss_total={avg_train_loss_total:.6f}"
+            )
+        else:
+            print(f"[train] epoch {epoch+1}: loss={avg_train_loss:.6f}")
 
         val_metrics = evaluate_mse_unified(model, ddpm, val_loader, device, multi_task=(mode=="multi"))
         va_loss_main.append(float(val_metrics["loss"]))
