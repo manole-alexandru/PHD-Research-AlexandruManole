@@ -6,6 +6,7 @@ import csv
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import time
 
 
 def ema_series(values: Sequence[float], decay: float = 0.98):
@@ -50,6 +51,7 @@ class MetricsLogger:
                 if train_loss_cons is not None: row += [train_loss_cons[i]]
                 if train_loss_total is not None: row += [train_loss_total[i]]
                 w.writerow(row)
+        time.sleep(0.1)
         assert train_csv.exists() and train_csv.stat().st_size > 0, f"Train CSV not saved: {train_csv}"
         return train_csv
 
@@ -75,6 +77,7 @@ class MetricsLogger:
                 if fid_train is not None: row += [fid_train[j]]
                 if fid_val is not None: row += [fid_val[j]]
                 w.writerow(row)
+        time.sleep(0.1)
         assert val_csv.exists() and val_csv.stat().st_size > 0, f"Val CSV not saved: {val_csv}"
         return val_csv
 
@@ -86,6 +89,7 @@ class MetricsLogger:
         plt.xlabel("step"); plt.ylabel("loss"); plt.title("Training loss (main)"); plt.legend(); plt.tight_layout()
         pl = self.out_dir / f"{self.prefix}training_loss_main.png"
         plt.savefig(pl, dpi=150); plt.close()
+        time.sleep(0.1)
         assert pl.exists() and pl.stat().st_size > 0, f"Plot not saved: {pl}"
         return pl
 
@@ -107,6 +111,7 @@ class MetricsLogger:
         plt.xlabel("step"); plt.ylabel("loss"); plt.title("Training loss components"); plt.legend(); plt.tight_layout()
         pl = self.out_dir / f"{self.prefix}training_loss_components.png"
         plt.savefig(pl, dpi=150); plt.close()
+        time.sleep(0.1)
         assert pl.exists() and pl.stat().st_size > 0, f"Plot not saved: {pl}"
         return pl
 
@@ -122,6 +127,7 @@ class MetricsLogger:
         plt.xlabel("epoch"); plt.ylabel("loss"); plt.title("Validation losses"); plt.legend(); plt.tight_layout()
         pl = self.out_dir / f"{self.prefix}val_losses.png"
         plt.savefig(pl, dpi=150); plt.close()
+        time.sleep(0.1)
         assert pl.exists() and pl.stat().st_size > 0, f"Plot not saved: {pl}"
         return pl
 
@@ -134,6 +140,55 @@ class MetricsLogger:
         plt.xlabel("epoch"); plt.ylabel("FID"); plt.title("FID over epochs"); plt.legend(); plt.tight_layout()
         pl = self.out_dir / f"{self.prefix}fid.png"
         plt.savefig(pl, dpi=150); plt.close()
+        time.sleep(0.1)
+        assert pl.exists() and pl.stat().st_size > 0, f"Plot not saved: {pl}"
+        return pl
+
+    # --------------- Epoch-level (train vs val) ---------------
+    def write_epoch_losses_csv(
+        self,
+        epochs: Sequence[int],
+        train_loss_epoch: Sequence[float],
+        val_loss_epoch: Sequence[float],
+        val_loss_x0: Optional[Sequence[float]] = None,
+    ) -> Path:
+        csv_path = self.out_dir / f"{self.prefix}epoch_losses.csv"
+        with open(csv_path, "w", newline="") as f:
+            w = csv.writer(f)
+            header = ["epoch", "train_loss", "val_loss"]
+            if val_loss_x0 is not None:
+                header += ["val_loss_x0"]
+            w.writerow(header)
+            for i, ep in enumerate(epochs):
+                tr = train_loss_epoch[i] if i < len(train_loss_epoch) else ""
+                vl = val_loss_epoch[i] if i < len(val_loss_epoch) else ""
+                row = [ep, tr, vl]
+                if val_loss_x0 is not None:
+                    vx = val_loss_x0[i] if i < len(val_loss_x0) else ""
+                    row.append(vx)
+                w.writerow(row)
+        import time as _t
+        _t.sleep(0.1)
+        assert csv_path.exists() and csv_path.stat().st_size > 0, f"Epoch CSV not saved: {csv_path}"
+        return csv_path
+
+    def plot_epoch_train_vs_val(
+        self,
+        epochs: Sequence[int],
+        train_loss_epoch: Sequence[float],
+        val_loss_epoch: Sequence[float],
+        val_loss_x0: Optional[Sequence[float]] = None,
+    ) -> Path:
+        plt.figure()
+        plt.plot(epochs, train_loss_epoch, label="train (epoch avg)")
+        plt.plot(epochs, val_loss_epoch, label="val")
+        if val_loss_x0 is not None:
+            plt.plot(epochs[:len(val_loss_x0)], val_loss_x0, label="val_x0")
+        plt.xlabel("epoch"); plt.ylabel("loss"); plt.title("Train vs Val (per epoch)"); plt.legend(); plt.tight_layout()
+        pl = self.out_dir / f"{self.prefix}epoch_train_vs_val.png"
+        plt.savefig(pl, dpi=150); plt.close()
+        import time as _t
+        _t.sleep(0.1)
         assert pl.exists() and pl.stat().st_size > 0, f"Plot not saved: {pl}"
         return pl
 
@@ -176,4 +231,3 @@ class MetricsLogger:
             'pl_val': pl_val,
             'pl_fid': pl_fid,
         }
-

@@ -6,6 +6,15 @@ from tqdm import tqdm
 from sampling import sample
 from .validate import _rand_timesteps
 from losses import unified_loss, deep_supervised_loss
+try:
+    from torch.cuda.amp import autocast
+except Exception:
+    def autocast(enabled: bool = False):
+        from contextlib import contextmanager
+        @contextmanager
+        def _noop():
+            yield
+        return _noop()
 
 
 def train_one_epoch(trainer, epoch_idx: int):
@@ -27,13 +36,21 @@ def train_one_epoch(trainer, epoch_idx: int):
         imgs = imgs.to(device)
         t = _rand_timesteps(ddpm, imgs, device)
 
-        if cfg.mode == "dsd":
-            total, parts = deep_supervised_loss(model, ddpm, imgs, t, cfg.dsd_w_aux_eps, cfg.dsd_w_aux_x0)
-        else:
-            total, parts = unified_loss(model, ddpm, imgs, t, multi_task=(cfg.mode=="multi"),
-                                        w_x0=cfg.w_x0, w_consistency=cfg.w_consistency, multi_variant=cfg.multi_variant)
+        with autocast(enabled=getattr(trainer, 'use_amp', False)):
+            if cfg.mode == "dsd":
+                total, parts = deep_supervised_loss(model, ddpm, imgs, t, cfg.dsd_w_aux_eps, cfg.dsd_w_aux_x0)
+            else:
+                total, parts = unified_loss(model, ddpm, imgs, t, multi_task=(cfg.mode=="multi"),
+                                            w_x0=cfg.w_x0, w_consistency=cfg.w_consistency, multi_variant=cfg.multi_variant)
 
-        trainer.optim.zero_grad(); total.backward(); trainer.optim.step()
+        trainer.optim.zero_grad()
+        if getattr(trainer, 'use_amp', False) and getattr(trainer, 'scaler', None) is not None:
+            trainer.scaler.scale(total).backward()
+            trainer.scaler.step(trainer.optim)
+            trainer.scaler.update()
+        else:
+            total.backward()
+            trainer.optim.step()
 
         trainer.step += 1
         trainer.train_steps.append(trainer.step)
@@ -72,4 +89,3 @@ def train_one_epoch(trainer, epoch_idx: int):
         print(f"[train] epoch {epoch_idx+1}: loss={avg['loss']:.6f}")
 
     return avg
-

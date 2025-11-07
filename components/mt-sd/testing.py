@@ -7,6 +7,8 @@ import csv as _csv
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import time
+import shutil
 
 from data_utils import make_test_loader  # type: ignore
 from diffusion import DDPM, DiffusionConfig  # type: ignore
@@ -86,8 +88,10 @@ def run_post_training_testing(
                 mse_loss = float(metrics["loss"]) if metrics and ("loss" in metrics) else float('nan')
 
                 # FID on test set: prepare real test and fake samples
-                test_real_dir = fid_dir / f"{file_prefix}_test" / "real"
-                test_fake_dir = fid_dir / f"{file_prefix}_test" / "fake"
+                # Use a temporary per-evaluation epoch-like directory and clean it after FID
+                ep_dir = fid_dir / f"{file_prefix}_test" / "epoch_eval"
+                test_real_dir = ep_dir / "real"
+                test_fake_dir = ep_dir / "fake"
                 for d in [test_real_dir, test_fake_dir]:
                     d.mkdir(parents=True, exist_ok=True)
                     # cleanup previous
@@ -129,6 +133,11 @@ def run_post_training_testing(
                     "mse_loss": mse_loss,
                     "fid_test": float(fid_test),
                 })
+                # Clean up temporary directories
+                try:
+                    shutil.rmtree(ep_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
     # Save results CSV
     out_csv = metrics_dir / "test_summary.csv"
@@ -137,6 +146,7 @@ def run_post_training_testing(
         writer.writeheader()
         for row in results:
             writer.writerow(row)
+    time.sleep(0.1)
     assert out_csv.exists() and out_csv.stat().st_size > 0, f"Test summary CSV not saved: {out_csv}"
 
     # Bar plots of FID per dataset
@@ -155,7 +165,7 @@ def run_post_training_testing(
         plt.ylabel("FID (test)"); plt.title(f"Test FID - {ds}"); plt.xticks(rotation=30, ha='right'); plt.tight_layout()
         out_bar = metrics_dir / f"{ds}_test_fid_bar.png"
         plt.savefig(out_bar, dpi=150); plt.close()
+        time.sleep(0.1)
         assert out_bar.exists() and out_bar.stat().st_size > 0, f"Bar plot not saved: {out_bar}"
 
     return out_csv
-

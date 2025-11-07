@@ -8,6 +8,7 @@ import sys
 import json
 import argparse
 import torch
+import time
 
 # Make sibling modules importable when running this file directly
 CUR_DIR = Path(__file__).parent
@@ -28,9 +29,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run diffusion experiments on MNIST/CIFAR10")
     parser.add_argument(
         "--data",
-        choices=["mnist", "cifar10", "cifar", "both", "none"],
+        choices=["mnist", "cifar10", "cifar", "cifar100", "svhn", "celeba", "both", "all", "none"],
         default="both",
-        help="Select dataset(s) to train: mnist, cifar10, both, or none (eval-only)",
+        help=(
+            "Select dataset(s): mnist, cifar10, cifar100, svhn, celeba, both (mnist+cifar10), all (all supported), or none (eval-only)"
+        ),
     )
     parser.add_argument(
         "--exp-dir",
@@ -48,8 +51,12 @@ if __name__ == "__main__":
     data_choice = args.data.lower()
     if data_choice in ("cifar10", "cifar"):
         DATASETS = ["cifar10"]
-    elif data_choice == "mnist":
-        DATASETS = ["mnist"]
+    elif data_choice in ("mnist", "cifar100", "svhn", "celeba"):
+        DATASETS = [data_choice]
+    elif data_choice == "both":
+        DATASETS = ["cifar10", "mnist"]
+    elif data_choice == "all":
+        DATASETS = ["cifar10", "mnist", "cifar100", "svhn", "celeba"]
     elif data_choice == "none":
         DATASETS = []
     else:
@@ -174,7 +181,7 @@ if __name__ == "__main__":
 
     # Combined comparisons (single vs multi): FID-only and Loss-only
     # Always consider both datasets here; functions handle missing files gracefully.
-    for ds in ["mnist", "cifar10"]:
+    for ds in DATASETS:
         prefixes = {
             "single": f"{ds}_single",
             "multi": f"{ds}_multi",
@@ -190,6 +197,7 @@ if __name__ == "__main__":
         plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) - {ds} (single vs multi)"); plt.legend(); plt.tight_layout()
         out_fid_only = metrics_dir / f"{ds}_single_vs_multi_val_fid.png"
         plt.savefig(out_fid_only, dpi=150); plt.close()
+        time.sleep(0.1)
         try:
             assert out_fid_only.exists() and out_fid_only.stat().st_size > 0, f"Plot not saved: {out_fid_only}"
         except Exception as e:
@@ -204,13 +212,14 @@ if __name__ == "__main__":
         plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss - {ds} (single vs multi)"); plt.legend(); plt.tight_layout()
         out_loss_only = metrics_dir / f"{ds}_single_vs_multi_val_loss.png"
         plt.savefig(out_loss_only, dpi=150); plt.close()
+        time.sleep(0.1)
         try:
             assert out_loss_only.exists() and out_loss_only.stat().st_size > 0, f"Plot not saved: {out_loss_only}"
         except Exception as e:
             raise AssertionError(f"Failed to save loss-only plot '{out_loss_only}': {e}")
 
     # Separate comparisons (val loss and FID), optionally including DSD
-    for ds in ["mnist", "cifar10"]:
+    for ds in DATASETS:
         prefixes = {
             "single": f"{ds}_single",
             "multi": f"{ds}_multi",
@@ -231,6 +240,7 @@ if __name__ == "__main__":
         plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss - {ds}"); plt.legend(); plt.tight_layout()
         out_val_loss = metrics_dir / f"{ds}_compare_val_loss.png"
         plt.savefig(out_val_loss, dpi=150); plt.close()
+        time.sleep(0.1)
         try:
             assert out_val_loss.exists() and out_val_loss.stat().st_size > 0, f"Plot not saved: {out_val_loss}"
         except Exception as e:
@@ -245,13 +255,14 @@ if __name__ == "__main__":
         plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) - {ds}"); plt.legend(); plt.tight_layout()
         out_fid_val = metrics_dir / f"{ds}_compare_fid_val.png"
         plt.savefig(out_fid_val, dpi=150); plt.close()
+        time.sleep(0.1)
         try:
             assert out_fid_val.exists() and out_fid_val.stat().st_size > 0, f"Plot not saved: {out_fid_val}"
         except Exception as e:
             raise AssertionError(f"Failed to save FID-val comparison plot '{out_fid_val}': {e}")
 
     # Evaluate best checkpoints on test set (extracted)
-    run_post_training_testing(EXP_ROOT, ["mnist", "cifar10"], with_dsd=WITH_DSD, fid_eval_images=1024)
+    run_post_training_testing(EXP_ROOT, DATASETS, with_dsd=WITH_DSD, fid_eval_images=1024)
 
 
 # TODO: After single-task, multi-task and dds were trained, plot the train losses and val losses in the same plot + fid evolutions
