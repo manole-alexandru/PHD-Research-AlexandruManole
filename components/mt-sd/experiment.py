@@ -55,7 +55,7 @@ if __name__ == "__main__":
         DATASETS = ["cifar10", "mnist"]
 
     # Centralized constants (change once here)
-    EPOCHS = 30
+    EPOCHS = 3
     WITH_DSD = False
     TIMESTEPS = 200
     N_SAMPLE = 64
