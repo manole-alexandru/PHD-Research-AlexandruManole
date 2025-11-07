@@ -46,6 +46,13 @@ if __name__ == "__main__":
         action="store_true",
         help="After training, perform post-train evaluation and plotting based only on saved files.",
     )
+    parser.add_argument(
+        "--exp-number", "--exp_no",
+        dest="exp_number",
+        type=int,
+        default=1,
+        help="Experiment number/id to use when creating EXP_ROOT (ignored if --exp-dir is provided).",
+    )
     args = parser.parse_args()
 
     data_choice = args.data.lower()
@@ -68,7 +75,7 @@ if __name__ == "__main__":
     TIMESTEPS = 200
     N_SAMPLE = 64
     SAMPLE_EVERY = 500
-    EXP_NO = 1  # experiment number/id
+    EXP_NO = int(args.exp_number)  # experiment number/id
 
     # Experiment folder: allow reusing a fixed directory via --exp-dir for cross-run aggregation
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
