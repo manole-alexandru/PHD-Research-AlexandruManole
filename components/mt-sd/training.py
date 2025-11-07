@@ -170,7 +170,6 @@ def train_unified(
                 epoch_loss_x0 += float(parts["loss_x0"]) 
                 epoch_loss_cons += float(parts["loss_cons"]) 
                 epoch_loss_total += float(parts["loss_total"]) 
-            # Do not log per-batch losses; we will report epoch averages after the loop
 
             if step % sample_every == 0:
                 try:
@@ -332,7 +331,6 @@ def train_unified(
             fid_val=fid_val_hist,
             file_prefix=file_prefix,
         )
-        print(f"[saved|{mode}|{ds_key}] metrics CSV/plots updated in {metrics_dir} with prefix '{file_prefix}_*'")
 
     with torch.no_grad():
         path, _ = sample(
