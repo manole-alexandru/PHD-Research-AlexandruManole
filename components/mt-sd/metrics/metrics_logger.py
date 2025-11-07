@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional, Sequence
+import csv
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+
+def ema_series(values: Sequence[float], decay: float = 0.98):
+    if not values:
+        return []
+    out, m = [], values[0]
+    for v in values:
+        m = decay * m + (1 - decay) * v
+        out.append(m)
+    return out
+
+
+class MetricsLogger:
+    def __init__(self, out_dir: Path, file_prefix: Optional[str] = None):
+        self.out_dir = Path(out_dir)
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.prefix = (file_prefix + "_") if file_prefix else ""
+
+    # --------------- CSV ---------------
+    def write_train_csv(
+        self,
+        train_steps: Sequence[int],
+        train_loss_main: Sequence[float],
+        train_loss_eps: Optional[Sequence[float]] = None,
+        train_loss_x0: Optional[Sequence[float]] = None,
+        train_loss_cons: Optional[Sequence[float]] = None,
+        train_loss_total: Optional[Sequence[float]] = None,
+    ) -> Path:
+        train_csv = self.out_dir / f"{self.prefix}train_losses.csv"
+        with open(train_csv, "w", newline="") as f:
+            w = csv.writer(f)
+            header = ["step", "loss"]
+            if train_loss_eps is not None: header += ["loss_eps"]
+            if train_loss_x0 is not None: header += ["loss_x0"]
+            if train_loss_cons is not None: header += ["loss_cons"]
+            if train_loss_total is not None: header += ["loss_total"]
+            w.writerow(header)
+            for i, s in enumerate(train_steps):
+                row = [s, train_loss_main[i]]
+                if train_loss_eps is not None: row += [train_loss_eps[i]]
+                if train_loss_x0 is not None: row += [train_loss_x0[i]]
+                if train_loss_cons is not None: row += [train_loss_cons[i]]
+                if train_loss_total is not None: row += [train_loss_total[i]]
+                w.writerow(row)
+        assert train_csv.exists() and train_csv.stat().st_size > 0, f"Train CSV not saved: {train_csv}"
+        return train_csv
+
+    def write_val_csv(
+        self,
+        val_epochs: Sequence[int],
+        val_loss_main: Sequence[float],
+        val_loss_x0: Optional[Sequence[float]] = None,
+        fid_train: Optional[Sequence[float]] = None,
+        fid_val: Optional[Sequence[float]] = None,
+    ) -> Path:
+        val_csv = self.out_dir / f"{self.prefix}val_metrics.csv"
+        with open(val_csv, "w", newline="") as f:
+            w = csv.writer(f)
+            header = ["epoch", "loss"]
+            if val_loss_x0 is not None: header += ["loss_x0"]
+            if fid_train is not None: header += ["fid_train"]
+            if fid_val is not None: header += ["fid_val"]
+            w.writerow(header)
+            for j, ep in enumerate(val_epochs):
+                row = [ep, val_loss_main[j]]
+                if val_loss_x0 is not None: row += [val_loss_x0[j]]
+                if fid_train is not None: row += [fid_train[j]]
+                if fid_val is not None: row += [fid_val[j]]
+                w.writerow(row)
+        assert val_csv.exists() and val_csv.stat().st_size > 0, f"Val CSV not saved: {val_csv}"
+        return val_csv
+
+    # --------------- Plots ---------------
+    def plot_training_main(self, train_steps: Sequence[int], train_loss_main: Sequence[float]) -> Path:
+        plt.figure()
+        plt.plot(train_steps, train_loss_main, label="loss (raw)")
+        plt.plot(train_steps, ema_series(train_loss_main), label="loss (EMA)")
+        plt.xlabel("step"); plt.ylabel("loss"); plt.title("Training loss (main)"); plt.legend(); plt.tight_layout()
+        pl = self.out_dir / f"{self.prefix}training_loss_main.png"
+        plt.savefig(pl, dpi=150); plt.close()
+        assert pl.exists() and pl.stat().st_size > 0, f"Plot not saved: {pl}"
+        return pl
+
+    def plot_training_components(
+        self,
+        train_steps: Sequence[int],
+        train_loss_eps: Optional[Sequence[float]] = None,
+        train_loss_x0: Optional[Sequence[float]] = None,
+        train_loss_cons: Optional[Sequence[float]] = None,
+        train_loss_total: Optional[Sequence[float]] = None,
+    ) -> Optional[Path]:
+        if (train_loss_eps is None) and (train_loss_x0 is None) and (train_loss_cons is None) and (train_loss_total is None):
+            return None
+        plt.figure()
+        if train_loss_eps is not None:  plt.plot(train_steps[:len(train_loss_eps)],  ema_series(train_loss_eps),  label="loss_eps (EMA)")
+        if train_loss_x0 is not None:   plt.plot(train_steps[:len(train_loss_x0)], ema_series(train_loss_x0), label="loss_x0 (EMA)")
+        if train_loss_cons is not None: plt.plot(train_steps[:len(train_loss_cons)], ema_series(train_loss_cons), label="loss_cons (EMA)")
+        if train_loss_total is not None:plt.plot(train_steps[:len(train_loss_total)], ema_series(train_loss_total), label="loss_total (EMA)")
+        plt.xlabel("step"); plt.ylabel("loss"); plt.title("Training loss components"); plt.legend(); plt.tight_layout()
+        pl = self.out_dir / f"{self.prefix}training_loss_components.png"
+        plt.savefig(pl, dpi=150); plt.close()
+        assert pl.exists() and pl.stat().st_size > 0, f"Plot not saved: {pl}"
+        return pl
+
+    def plot_val_losses(
+        self,
+        val_epochs: Sequence[int],
+        val_loss_main: Sequence[float],
+        val_loss_x0: Optional[Sequence[float]] = None,
+    ) -> Path:
+        plt.figure()
+        plt.plot(val_epochs, val_loss_main, label="val loss (eps)")
+        if val_loss_x0 is not None: plt.plot(val_epochs, val_loss_x0, label="val loss_x0")
+        plt.xlabel("epoch"); plt.ylabel("loss"); plt.title("Validation losses"); plt.legend(); plt.tight_layout()
+        pl = self.out_dir / f"{self.prefix}val_losses.png"
+        plt.savefig(pl, dpi=150); plt.close()
+        assert pl.exists() and pl.stat().st_size > 0, f"Plot not saved: {pl}"
+        return pl
+
+    def plot_fid(self, val_epochs: Sequence[int], fid_train: Optional[Sequence[float]] = None, fid_val: Optional[Sequence[float]] = None) -> Optional[Path]:
+        if fid_train is None and fid_val is None:
+            return None
+        plt.figure()
+        if fid_train is not None: plt.plot(val_epochs, fid_train, label="FID (train)")
+        if fid_val is not None:   plt.plot(val_epochs, fid_val,   label="FID (val)")
+        plt.xlabel("epoch"); plt.ylabel("FID"); plt.title("FID over epochs"); plt.legend(); plt.tight_layout()
+        pl = self.out_dir / f"{self.prefix}fid.png"
+        plt.savefig(pl, dpi=150); plt.close()
+        assert pl.exists() and pl.stat().st_size > 0, f"Plot not saved: {pl}"
+        return pl
+
+    # --------------- Orchestration ---------------
+    def save_all(
+        self,
+        train_steps: Sequence[int],
+        train_loss_main: Sequence[float],
+        val_epochs: Sequence[int],
+        val_loss_main: Sequence[float],
+        train_loss_eps: Optional[Sequence[float]] = None,
+        train_loss_x0: Optional[Sequence[float]] = None,
+        train_loss_cons: Optional[Sequence[float]] = None,
+        train_loss_total: Optional[Sequence[float]] = None,
+        val_loss_x0: Optional[Sequence[float]] = None,
+        fid_train: Optional[Sequence[float]] = None,
+        fid_val: Optional[Sequence[float]] = None,
+    ) -> dict:
+        train_csv = self.write_train_csv(
+            train_steps, train_loss_main,
+            train_loss_eps=train_loss_eps,
+            train_loss_x0=train_loss_x0,
+            train_loss_cons=train_loss_cons,
+            train_loss_total=train_loss_total,
+        )
+        val_csv = self.write_val_csv(
+            val_epochs, val_loss_main,
+            val_loss_x0=val_loss_x0,
+            fid_train=fid_train, fid_val=fid_val,
+        )
+        pl_main = self.plot_training_main(train_steps, train_loss_main)
+        pl_comp = self.plot_training_components(train_steps, train_loss_eps, train_loss_x0, train_loss_cons, train_loss_total)
+        pl_val  = self.plot_val_losses(val_epochs, val_loss_main, val_loss_x0)
+        pl_fid  = self.plot_fid(val_epochs, fid_train, fid_val)
+        return {
+            'train_csv': train_csv,
+            'val_csv': val_csv,
+            'pl_main': pl_main,
+            'pl_comp': pl_comp,
+            'pl_val': pl_val,
+            'pl_fid': pl_fid,
+        }
+
