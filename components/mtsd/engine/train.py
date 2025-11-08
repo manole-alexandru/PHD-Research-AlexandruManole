@@ -74,7 +74,9 @@ def train_one_epoch(trainer, epoch_idx: int):
             e_cons+= float(parts.get("loss_cons", 0.0))
             e_tot += float(parts.get("loss_total", 0.0))
 
-        if (trainer.step % cfg.sample_every) == 0:
+        # For single-task (and other non-multi modes), keep step-based grids.
+        # Multi-task grids are saved at end of each epoch (see training.run).
+        if (trainer.step % cfg.sample_every) == 0 and cfg.mode != "multi":
             try:
                 with torch.no_grad():
                     grid_path = trainer.grid_dir / f"{trainer.file_prefix}_samples_step{trainer.step}.png"

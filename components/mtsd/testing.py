@@ -154,23 +154,24 @@ def run_post_training_testing(
     time.sleep(0.1)
     assert out_csv.exists() and out_csv.stat().st_size > 0, f"Test summary CSV not saved: {out_csv}"
 
-    # Bar plots of FID per dataset
-    for ds in datasets:
-        items = [r for r in results if r["dataset"] == ds]
-        if not items:
-            continue
-        labels = [f"{r['mode']}_{r['checkpoint']}" for r in items]
-        values = [r['fid_test'] for r in items]
-        plt.figure(figsize=(10, 4))
-        plt.bar(
-            labels,
-            values,
-            color=["tab:blue" if 'single' in lb else ("tab:orange" if 'multi' in lb else "tab:green") for lb in labels],
-        )
-        plt.ylabel("FID (test)"); plt.title(f"Test FID - {ds}"); plt.xticks(rotation=30, ha='right'); plt.tight_layout()
-        out_bar = metrics_dir / f"{ds}_test_fid_bar.png"
-        plt.savefig(out_bar, dpi=150); plt.close()
+    # Single aggregate bar plot: all datasets × modes (and checkpoints)
+    if results:
+        labels = [f"{r['dataset']}|{r['mode']}|{r['checkpoint']}" for r in results]
+        values = [r['fid_test'] for r in results]
+        colors = []
+        for r in results:
+            if r['mode'] == 'single':
+                colors.append('tab:blue')
+            elif r['mode'] == 'multi':
+                colors.append('tab:orange')
+            else:
+                colors.append('tab:green')
+        plt.figure(figsize=(max(10, len(labels) * 0.6), 4))
+        plt.bar(labels, values, color=colors)
+        plt.ylabel("FID (test)"); plt.title("Test FID - All Datasets and Modes"); plt.xticks(rotation=30, ha='right'); plt.tight_layout()
+        out_bar_all = metrics_dir / "test_fid_bar_all.png"
+        plt.savefig(out_bar_all, dpi=150); plt.close()
         time.sleep(0.1)
-        assert out_bar.exists() and out_bar.stat().st_size > 0, f"Bar plot not saved: {out_bar}"
+        assert out_bar_all.exists() and out_bar_all.stat().st_size > 0, f"Bar plot not saved: {out_bar_all}"
 
     return out_csv

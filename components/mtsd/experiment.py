@@ -97,7 +97,7 @@ if __name__ == "__main__":
         DATASETS = ["cifar10", "mnist"]
 
     # Centralized constants (change once here)
-    EPOCHS = 15
+    EPOCHS = 3
     WITH_DSD = False
     TIMESTEPS = 200
     N_SAMPLE = 64
@@ -201,126 +201,95 @@ if __name__ == "__main__":
 
     def _read_val_metrics(prefix: str):
         path = metrics_dir / f"{prefix}_val_metrics.csv"
-        epochs, losses, fid_val = [], [], []
+        epochs, losses, loss_x0, fid_train, fid_val = [], [], [], [], []
         if not path.exists():
-            return epochs, losses, fid_val
+            return epochs, losses, loss_x0, fid_train, fid_val
         with open(path, "r", newline="") as f:
             r = csv.DictReader(f)
             for row in r:
                 try:
                     epochs.append(int(float(row.get("epoch", 0))))
                     losses.append(float(row.get("loss", "nan")))
-                    if "fid_val" in row:
+                    if "loss_x0" in row and row.get("loss_x0", "") != "":
+                        loss_x0.append(float(row.get("loss_x0", "nan")))
+                    if "fid_train" in row and row.get("fid_train", "") != "":
+                        fid_train.append(float(row.get("fid_train", "nan")))
+                    if "fid_val" in row and row.get("fid_val", "") != "":
                         fid_val.append(float(row.get("fid_val", "nan")))
                 except Exception:
                     continue
-        return epochs, losses, fid_val
+        return epochs, losses, loss_x0, fid_train, fid_val
 
     # If --eval is not set, skip all post-train evaluation steps
     # if not args.eval:
     #    sys.exit(0)
 
-    # Combined comparisons (single vs multi): FID-only and Loss-only
-    # Always consider both datasets here; functions handle missing files gracefully.
+    # Per-run: FID value per epoch (train & validation if available)
     for ds in DATASETS:
-        prefixes = {
-            "single": f"{ds}_single",
-            "multi": f"{ds}_multi",
-        }
-        series = {k: _read_val_metrics(v) for k, v in prefixes.items()}
+        for mode, color in [("single", "tab:blue"), ("multi", "tab:orange")]:
+            prefix = f"{ds}_{mode}"
+            ep, _, _, fid_tr, fid_v = _read_val_metrics(prefix)
+            if not ep or (not fid_tr and not fid_v):
+                continue
+            plt.figure()
+            if fid_tr:
+                plt.plot(ep[:len(fid_tr)], fid_tr, label="FID (train)", color=color, linestyle="-")
+            if fid_v:
+                plt.plot(ep[:len(fid_v)], fid_v, label="FID (val)", color=color, linestyle=":")
+            plt.xlabel("epoch"); plt.ylabel("FID"); plt.title(f"FID per Epoch - {ds} ({mode})"); plt.legend(); plt.tight_layout()
+            out_fid = metrics_dir / f"{prefix}_fid_per_epoch.png"
+            plt.savefig(out_fid, dpi=150); plt.close()
+            time.sleep(0.1)
+            assert out_fid.exists() and out_fid.stat().st_size > 0, f"Plot not saved: {out_fid}"
 
-        # FID-only (single vs multi)
-        plt.figure()
-        _plotted_any = False
-        for label, color in [("single", "tab:blue"), ("multi", "tab:orange")]:
-            ep, _, fidv = series.get(label, ([], [], []))
-            if ep and fidv:
-                plt.plot(ep, fidv, label=label, color=color)
-                _plotted_any = True
-        plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) - {ds} (single vs multi)")
-        if _plotted_any:
-            plt.legend()
-        plt.tight_layout()
-        out_fid_only = metrics_dir / f"{ds}_single_vs_multi_val_fid.png"
-        plt.savefig(out_fid_only, dpi=150); plt.close()
-        time.sleep(0.1)
-        try:
-            assert out_fid_only.exists() and out_fid_only.stat().st_size > 0, f"Plot not saved: {out_fid_only}"
-        except Exception as e:
-            raise AssertionError(f"Failed to save FID-only plot '{out_fid_only}': {e}")
-
-        # Loss-only (single vs multi)
-        plt.figure()
-        _plotted_any = False
-        for label, color in [("single", "tab:blue"), ("multi", "tab:orange")]:
-            ep, loss, _ = series.get(label, ([], [], []))
-            if ep and loss:
-                plt.plot(ep, loss, label=label, color=color)
-                _plotted_any = True
-        plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss - {ds} (single vs multi)")
-        if _plotted_any:
-            plt.legend()
-        plt.tight_layout()
-        out_loss_only = metrics_dir / f"{ds}_single_vs_multi_val_loss.png"
-        plt.savefig(out_loss_only, dpi=150); plt.close()
-        time.sleep(0.1)
-        try:
-            assert out_loss_only.exists() and out_loss_only.stat().st_size > 0, f"Plot not saved: {out_loss_only}"
-        except Exception as e:
-            raise AssertionError(f"Failed to save loss-only plot '{out_loss_only}': {e}")
-
-    # Separate comparisons (val loss and FID), optionally including DSD
+    # Combined single vs multi: one figure with (left) FID evolution, (right) loss evolution
     for ds in DATASETS:
-        prefixes = {
-            "single": f"{ds}_single",
-            "multi": f"{ds}_multi",
-        }
-        if WITH_DSD:
-            prefixes["dsd"] = f"{ds}_dsd"
-        series = {k: _read_val_metrics(v) for k, v in prefixes.items()}
-
-        # Val loss comparison
-        plt.figure()
-        labels_colors = [("single", "tab:blue"), ("multi", "tab:orange")]
-        if WITH_DSD:
-            labels_colors.append(("dsd", "tab:green"))
-        _plotted_any = False
-        for label, color in labels_colors:
-            ep, loss, _ = series.get(label, ([], [], []))
-            if ep and loss:
-                plt.plot(ep, loss, label=label, color=color)
-                _plotted_any = True
-        plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss - {ds}")
-        if _plotted_any:
-            plt.legend()
-        plt.tight_layout()
-        out_val_loss = metrics_dir / f"{ds}_compare_val_loss.png"
-        plt.savefig(out_val_loss, dpi=150); plt.close()
+        single = _read_val_metrics(f"{ds}_single")
+        multi  = _read_val_metrics(f"{ds}_multi")
+        ep_s, loss_s, _, fid_tr_s, fid_v_s = single
+        ep_m, loss_m, loss_m_x0, fid_tr_m, fid_v_m = multi
+        if not ep_s or not ep_m:
+            continue
+        # Choose FID series preference: val if available else train
+        fid_s = fid_v_s if fid_v_s else fid_tr_s
+        fid_m = fid_v_m if fid_v_m else fid_tr_m
+        if not fid_s and not fid_m:
+            # still create the figure to show loss comparison
+            pass
+        # Build the combined figure
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        ax_fid, ax_loss = axes
+        # FID evolution
+        plotted_any = False
+        if fid_s:
+            ax_fid.plot(ep_s[:len(fid_s)], fid_s, label="single", color="tab:blue")
+            plotted_any = True
+        if fid_m:
+            ax_fid.plot(ep_m[:len(fid_m)], fid_m, label="multi", color="tab:orange")
+            plotted_any = True
+        ax_fid.set_xlabel("epoch"); ax_fid.set_ylabel("FID"); ax_fid.set_title(f"FID per Epoch - {ds}")
+        if plotted_any:
+            ax_fid.legend()
+        # Loss evolution (validation loss); ensure identical objective (eps) is included
+        plotted_any = False
+        if loss_s:
+            ax_loss.plot(ep_s[:len(loss_s)], loss_s, label="single (val eps)", color="tab:blue")
+            plotted_any = True
+        if loss_m:
+            ax_loss.plot(ep_m[:len(loss_m)], loss_m, label="multi (val eps)", color="tab:orange")
+            plotted_any = True
+        # Optionally also show multi's x0 loss if present
+        if loss_m_x0:
+            ax_loss.plot(ep_m[:len(loss_m_x0)], loss_m_x0, label="multi (val x0)", color="tab:orange", linestyle=":")
+        ax_loss.set_xlabel("epoch"); ax_loss.set_ylabel("loss"); ax_loss.set_title(f"Loss per Epoch - {ds}")
+        if plotted_any:
+            ax_loss.legend()
+        fig.tight_layout()
+        out_cmp = metrics_dir / f"{ds}_single_vs_multi_fid_and_loss.png"
+        fig.savefig(out_cmp, dpi=150)
+        plt.close(fig)
         time.sleep(0.1)
-        try:
-            assert out_val_loss.exists() and out_val_loss.stat().st_size > 0, f"Plot not saved: {out_val_loss}"
-        except Exception as e:
-            raise AssertionError(f"Failed to save val-loss comparison plot '{out_val_loss}': {e}")
-
-        # FID (val) comparison
-        plt.figure()
-        _plotted_any = False
-        for label, color in labels_colors:
-            ep, _, fidv = series.get(label, ([], [], []))
-            if ep and fidv:
-                plt.plot(ep, fidv, label=label, color=color)
-                _plotted_any = True
-        plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) - {ds}")
-        if _plotted_any:
-            plt.legend()
-        plt.tight_layout()
-        out_fid_val = metrics_dir / f"{ds}_compare_fid_val.png"
-        plt.savefig(out_fid_val, dpi=150); plt.close()
-        time.sleep(0.1)
-        try:
-            assert out_fid_val.exists() and out_fid_val.stat().st_size > 0, f"Plot not saved: {out_fid_val}"
-        except Exception as e:
-            raise AssertionError(f"Failed to save FID-val comparison plot '{out_fid_val}': {e}")
+        assert out_cmp.exists() and out_cmp.stat().st_size > 0, f"Plot not saved: {out_cmp}"
 
     # Evaluate best checkpoints on test set (extracted)
     run_post_training_testing(

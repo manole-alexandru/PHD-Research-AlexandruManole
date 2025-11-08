@@ -336,6 +336,17 @@ class UnifiedTrainer:
                 self.tr_epoch_loss_cons.append(float(avg.get('loss_cons', float('nan'))))
                 self.tr_epoch_loss_total.append(float(avg.get('loss_total', float('nan'))))
 
+            # For multi-task, log a grid once per epoch (not per step)
+            if self.cfg.mode == "multi":
+                try:
+                    with torch.no_grad():
+                        grid_path = self.grid_dir / f"{self.file_prefix}_samples_epoch{epoch+1}.png"
+                        sample(self.model, self.ddpm,
+                               shape=(self.cfg.n_sample, self.channels, self.img_size, self.img_size),
+                               device=self.device, save_path=str(grid_path))
+                except Exception as e:
+                    print(f"[warn|sample-grid-epoch|multi|{self.ds_key}] epoch={epoch+1} failed: {e}")
+
             val_metrics = self.evaluate_mse()
             self.va_loss_main.append(float(val_metrics["loss"]))
             if self.cfg.mode == "multi":
