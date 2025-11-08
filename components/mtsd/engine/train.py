@@ -61,15 +61,10 @@ def train_one_epoch(trainer, epoch_idx: int):
             trainer.optim.step()
 
         trainer.step += 1
-        trainer.train_steps.append(trainer.step)
-        trainer.tr_loss_main.append(float(parts["loss"]))
 
         eb += 1
         e_loss += float(parts["loss"]) 
         if cfg.mode in ("multi", "dsd"):
-            trainer.tr_loss_x0.append(float(parts.get("loss_x0", 0.0)))
-            trainer.tr_loss_cons.append(float(parts.get("loss_cons", 0.0)))
-            trainer.tr_loss_total.append(float(parts.get("loss_total", 0.0)))
             e_x0  += float(parts.get("loss_x0", 0.0))
             e_cons+= float(parts.get("loss_cons", 0.0))
             e_tot += float(parts.get("loss_total", 0.0))

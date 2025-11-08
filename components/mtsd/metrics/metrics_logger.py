@@ -42,7 +42,7 @@ class MetricsLogger:
         train_csv = self.out_dir / f"{self.prefix}train_losses.csv"
         with open(train_csv, "w", newline="") as f:
             w = csv.writer(f)
-            header = ["step", "loss"]
+            header = ["epoch", "loss"]
             if train_loss_eps is not None: header += ["loss_eps"]
             if train_loss_x0 is not None: header += ["loss_x0"]
             if train_loss_cons is not None: header += ["loss_cons"]
@@ -90,7 +90,7 @@ class MetricsLogger:
         plt.figure()
         plt.plot(train_steps, train_loss_main, label="loss (raw)")
         plt.plot(train_steps, ema_series(train_loss_main), label="loss (EMA)")
-        plt.xlabel("step"); plt.ylabel("loss"); plt.title("Training loss (main)"); plt.legend(); plt.tight_layout()
+        plt.xlabel("epoch"); plt.ylabel("loss"); plt.title("Training loss (main)"); plt.legend(); plt.tight_layout()
         pl = self.out_dir / f"{self.prefix}training_loss_main.png"
         plt.savefig(pl, dpi=150); plt.close()
         time.sleep(0.1)
@@ -112,7 +112,7 @@ class MetricsLogger:
         if train_loss_x0 is not None:   plt.plot(train_steps[:len(train_loss_x0)], ema_series(train_loss_x0), label="loss_x0 (EMA)")
         if train_loss_cons is not None: plt.plot(train_steps[:len(train_loss_cons)], ema_series(train_loss_cons), label="loss_cons (EMA)")
         if train_loss_total is not None:plt.plot(train_steps[:len(train_loss_total)], ema_series(train_loss_total), label="loss_total (EMA)")
-        plt.xlabel("step"); plt.ylabel("loss"); plt.title("Training loss components"); plt.legend(); plt.tight_layout()
+        plt.xlabel("epoch"); plt.ylabel("loss"); plt.title("Training loss components"); plt.legend(); plt.tight_layout()
         pl = self.out_dir / f"{self.prefix}training_loss_components.png"
         plt.savefig(pl, dpi=150); plt.close()
         time.sleep(0.1)
