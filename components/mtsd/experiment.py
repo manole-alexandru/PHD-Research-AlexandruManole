@@ -9,6 +9,14 @@ import json
 import argparse
 import torch
 import time
+import warnings
+
+# Suppress noisy deprecation from dependencies (TypedStorage -> UntypedStorage)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*TypedStorage is deprecated.*",
+    category=UserWarning,
+)
 
 # Make sibling modules importable when running this file directly
 CUR_DIR = Path(__file__).parent
@@ -25,6 +33,18 @@ from testing import run_post_training_testing  # type: ignore
 
 
 if __name__ == "__main__":
+
+    # Early GPU check
+    try:
+        _cuda = torch.cuda.is_available()
+        _gpu_count = torch.cuda.device_count() if _cuda else 0
+        _device_name = (
+            torch.cuda.get_device_name(0) if (_cuda and _gpu_count > 0) else "CPU"
+        )
+        print(f"[Init] CUDA available: {_cuda} | GPUs: {_gpu_count} | Using: {_device_name}")
+    except Exception as e:
+        print(f"[Init] CUDA check failed: {e}")
+
     # CLI parameters
     parser = argparse.ArgumentParser(description="Run diffusion experiments on MNIST/CIFAR10")
     parser.add_argument(
@@ -44,7 +64,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--eval",
         action="store_true",
+        default=True,
         help="After training, perform post-train evaluation and plotting based only on saved files.",
+    )
+    parser.add_argument(
+        "--keep-fid-images",
+        action="store_true",
+        default=True,
+        help="Do not delete per-epoch/test FID image folders; keep PNGs for inspection.",
     )
     parser.add_argument(
         "--exp-number", "--exp_no",
@@ -79,7 +106,7 @@ if __name__ == "__main__":
 
     # Experiment folder: allow reusing a fixed directory via --exp-dir for cross-run aggregation
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    EXP_BASE = Path("C:/Mano/profession/phd/PHD-Research-AlexandruManole/components/mt-sd/experiment/") # Path("/content/drive/MyDrive/prototypes/mtsd_exp")
+    EXP_BASE = Path("C:/Mano/profession/phd/PHD-Research-AlexandruManole/components/mtsd/runs/") # Path("/content/drive/MyDrive/prototypes/mtsd_exp")
     if args.exp_dir:
         EXP_ROOT = Path(args.exp_dir)
     else:
@@ -102,7 +129,7 @@ if __name__ == "__main__":
         "BASE": 32,
         "TIME_DIM": 128,
         "VAL_SPLIT": 0.05,
-        "FID_EVAL_IMAGES": 256,
+        "FID_EVAL_IMAGES": 1024,
         "W_X0": 1.0,
         "W_CONSISTENCY": 0.1,
         "WITH_DSD": WITH_DSD,
@@ -127,6 +154,7 @@ if __name__ == "__main__":
             timesteps=TIMESTEPS,
             n_sample=N_SAMPLE,
             sample_every=SAMPLE_EVERY,
+            keep_fid_images=bool(args.keep_fid_images),
         )
         # Multi-task (named variant: eps_x0_consistency)
         train_unified(
@@ -141,6 +169,7 @@ if __name__ == "__main__":
             w_x0=cfg["W_X0"],
             w_consistency=cfg["W_CONSISTENCY"],
             multi_variant="eps_x0_consistency",
+            keep_fid_images=bool(args.keep_fid_images),
         )
         # Deep Supervised Diffusion (optional)
         if WITH_DSD:
@@ -153,6 +182,7 @@ if __name__ == "__main__":
                 timesteps=TIMESTEPS,
                 n_sample=N_SAMPLE,
                 sample_every=SAMPLE_EVERY,
+                keep_fid_images=bool(args.keep_fid_images),
             )
 
     # After all runs, create combined comparison plots (val loss and FID) per dataset
@@ -183,8 +213,8 @@ if __name__ == "__main__":
         return epochs, losses, fid_val
 
     # If --eval is not set, skip all post-train evaluation steps
-    if not args.eval:
-        sys.exit(0)
+    # if not args.eval:
+    #    sys.exit(0)
 
     # Combined comparisons (single vs multi): FID-only and Loss-only
     # Always consider both datasets here; functions handle missing files gracefully.
@@ -269,7 +299,4 @@ if __name__ == "__main__":
             raise AssertionError(f"Failed to save FID-val comparison plot '{out_fid_val}': {e}")
 
     # Evaluate best checkpoints on test set (extracted)
-    run_post_training_testing(EXP_ROOT, DATASETS, with_dsd=WITH_DSD, fid_eval_images=1024)
-
-
-# TODO: After single-task, multi-task and dds were trained, plot the train losses and val losses in the same plot + fid evolutions
+    run_post_training_testing(EXP_ROOT, DATASETS, with_dsd=WITH_DSD, fid_eval_images=1024, keep_fid_images=bool(args.keep_fid_images))

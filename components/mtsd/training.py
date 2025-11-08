@@ -5,20 +5,34 @@ import math
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
+# AMP (automatic mixed precision) compatibility shim: prefer torch.amp API
 try:
-    from torch.cuda.amp import GradScaler, autocast  # type: ignore
-except Exception:
-    GradScaler = None  # type: ignore
+    from torch.amp import GradScaler as _AmpGradScaler  # type: ignore
+    from torch.amp import autocast as _amp_autocast      # type: ignore
+    def GradScaler(*, enabled: bool = True):  # type: ignore
+        return _AmpGradScaler('cuda', enabled=enabled)
     def autocast(enabled: bool = False):  # type: ignore
-        from contextlib import contextmanager
-        @contextmanager
-        def _noop():
-            yield
-        return _noop()
+        return _amp_autocast('cuda', enabled=enabled)
+except Exception:
+    try:
+        from torch.cuda.amp import GradScaler as _CudaGradScaler  # type: ignore
+        from torch.cuda.amp import autocast as _cuda_autocast      # type: ignore
+        def GradScaler(*, enabled: bool = True):  # type: ignore
+            return _CudaGradScaler(enabled=enabled)
+        def autocast(enabled: bool = False):  # type: ignore
+            return _cuda_autocast(enabled=enabled)
+    except Exception:
+        GradScaler = None  # type: ignore
+        def autocast(enabled: bool = False):  # type: ignore
+            from contextlib import contextmanager
+            @contextmanager
+            def _noop():
+                yield
+            return _noop()
 
 from models import TinyUNet, DeepSupervisedUNet
 from diffusion import DDPM, DiffusionConfig
-from data_utils import make_dataloader
+from data_utils import make_dataloader, make_test_loader
 from sampling import sample
 from metrics_utils import (
     denorm, dump_images, compute_fid, save_curves_unified_prefixed
@@ -53,6 +67,8 @@ class TrainConfig:
     multi_variant: str = "eps_x0_consistency"
     dsd_w_aux_eps: float = 0.5
     dsd_w_aux_x0: float = 0.5
+    # Keep per-epoch FID image folders instead of deleting them
+    keep_fid_images: bool = False
 
 
 class UnifiedTrainer:
@@ -77,7 +93,9 @@ class UnifiedTrainer:
         self.fid_val_real = self.fid_dir / "val_real"      # legacy (unused in per-epoch mode)
         self.fid_val_fake = self.fid_dir / "val_fake"      # legacy (unused in per-epoch mode)
         self.file_prefix = f"{self.ds_key}_{cfg.mode}"
-        for d in [self.images_dir, self.metrics_dir, self.fid_train_real, self.fid_train_fake, self.fid_val_real, self.fid_val_fake, self.ckpt_dir]:
+        # Add a subfolder for visualization grids under images/
+        self.grid_dir = self.images_dir / "grid"
+        for d in [self.images_dir, self.grid_dir, self.metrics_dir, self.fid_train_real, self.fid_train_fake, self.fid_val_real, self.fid_val_fake, self.ckpt_dir]:
             d.mkdir(parents=True, exist_ok=True)
         print(f"[paths|{cfg.mode}|{self.ds_key}] images={self.images_dir} metrics={self.metrics_dir} fid_dir={self.fid_dir} ckpts={self.ckpt_dir}")
 
@@ -95,6 +113,23 @@ class UnifiedTrainer:
         self.train_loader, self.val_loader, self.train_fid_loader = make_dataloader(
             self.ds_key, cfg.batch_size, self.img_size, self.channels, val_split=cfg.val_split
         )
+        # Dataset sizes (print before training starts)
+        try:
+            train_size = len(self.train_loader.dataset)
+        except Exception:
+            train_size = -1
+        try:
+            val_size = len(self.val_loader.dataset)
+        except Exception:
+            val_size = -1
+        try:
+            _tloader = make_test_loader(self.ds_key, cfg.batch_size, self.img_size, self.channels)
+            test_size = len(_tloader.dataset)
+            del _tloader
+        except Exception:
+            test_size = -1
+        _ts = test_size if isinstance(test_size, int) and test_size >= 0 else 'unknown'
+        print(f"[data|{cfg.mode}|{self.ds_key}] train={train_size} val={val_size} test={_ts} batch={cfg.batch_size}")
 
         if cfg.mode == "dsd":
             self.model: torch.nn.Module = DeepSupervisedUNet(in_channels=self.channels, base=cfg.base, time_dim=cfg.time_dim).to(self.device)
@@ -134,15 +169,16 @@ class UnifiedTrainer:
 
     def _make_epoch_fid_dirs(self, epoch_idx: int):
         """Create per-epoch FID directories and return them.
-        Train dir: fid/{file_prefix}/epoch_{k}/...
-        Val dir:   fid/{file_prefix}/fid_validation_epoch{k}/...
+        Train + Val dir: fid/{file_prefix}/epoch_{k}/...
+        Validation samples are now stored alongside training under the same epoch folder
+        in subfolders 'val_real' and 'val_fake'.
         """
         tr_dir = self.fid_dir / f"epoch_{epoch_idx+1}"
-        va_dir = self.fid_dir / f"fid_validation_epoch{epoch_idx+1}"
+        va_dir = tr_dir  # keep validation inside the epoch folder as well
         tr_real = tr_dir / "train_real"
         tr_fake = tr_dir / "train_fake"
-        va_real = va_dir / "real"
-        va_fake = va_dir / "fake"
+        va_real = va_dir / "val_real"
+        va_fake = va_dir / "val_fake"
         for d in [tr_real, tr_fake, va_real, va_fake]:
             d.mkdir(parents=True, exist_ok=True)
         return {
@@ -163,6 +199,8 @@ class UnifiedTrainer:
             if collected >= self.cfg.fid_eval_images: break
         real_train = torch.cat(imgs_accum, dim=0)[:self.cfg.fid_eval_images]
         real_train = denorm(real_train, self.channels)
+        # sanitize to avoid NaNs/Infs in downstream FID computation
+        real_train = torch.nan_to_num(real_train, nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
         dump_images(real_train, str(fid_dirs['train_real']), prefix=f"{self.file_prefix}_real")
         # Val real
         collected = 0; imgs_accum = []
@@ -172,6 +210,7 @@ class UnifiedTrainer:
             if collected >= self.cfg.fid_eval_images: break
         real_val = torch.cat(imgs_accum, dim=0)[:self.cfg.fid_eval_images]
         real_val = denorm(real_val, self.channels)
+        real_val = torch.nan_to_num(real_val, nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
         dump_images(real_val, str(fid_dirs['val_real']), prefix=f"{self.file_prefix}_real")
 
     @torch.no_grad()
@@ -179,36 +218,33 @@ class UnifiedTrainer:
         _, fake_batch = sample(
             self.model, self.ddpm,
             shape=(min(self.cfg.fid_eval_images, self.cfg.n_sample), self.channels, self.img_size, self.img_size),
-            device=self.device, save_path=str(self.images_dir / f"{self.file_prefix}_samples_trainfid_epoch{epoch_idx+1}.png"),
+            device=self.device, save_path=str(fid_dirs['train_fake'] / f"grid_trainfid_epoch{epoch_idx+1}.png"),
         )
-        fake_list = [denorm(fake_batch.cpu(), self.channels)]
+        fake_list = [torch.nan_to_num(denorm(fake_batch.cpu(), self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)]
         while sum(x.size(0) for x in fake_list) < self.cfg.fid_eval_images:
             _, fb = sample(
                 self.model, self.ddpm,
                 shape=(min(self.cfg.fid_eval_images - sum(x.size(0) for x in fake_list), self.cfg.n_sample),
                        self.channels, self.img_size, self.img_size),
-                device=self.device, save_path=str(self.images_dir / "_tmp.png"),
+                device=self.device, save_path=str(fid_dirs['train_fake'] / "_tmp.png"),
             )
-            fake_list.append(denorm(fb.cpu(), self.channels))
+            fake_list.append(torch.nan_to_num(denorm(fb.cpu(), self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0))
         fake_train = torch.cat(fake_list, dim=0)[:self.cfg.fid_eval_images]
         dump_images(fake_train, str(fid_dirs['train_fake']), prefix=f"{self.file_prefix}_fake")
 
-        _, fake_batch_val = sample(
-            self.model, self.ddpm,
-            shape=(min(self.cfg.fid_eval_images, self.cfg.n_sample), self.channels, self.img_size, self.img_size),
-            device=self.device, save_path=str(self.images_dir / f"{self.file_prefix}_samples_valfid_epoch{epoch_idx+1}.png"),
-        )
-        fake_list_val = [denorm(fake_batch_val.cpu(), self.channels)]
+        # Generate enough fake samples for validation FID as well
+        fake_list_val = []
         while sum(x.size(0) for x in fake_list_val) < self.cfg.fid_eval_images:
-            _, fb = sample(
+            n = min(self.cfg.fid_eval_images - sum(x.size(0) for x in fake_list_val), self.cfg.n_sample)
+            _, fbv = sample(
                 self.model, self.ddpm,
-                shape=(min(self.cfg.fid_eval_images - sum(x.size(0) for x in fake_list_val), self.cfg.n_sample),
-                       self.channels, self.img_size, self.img_size),
-                device=self.device, save_path=str(self.images_dir / "_tmp2.png"),
+                shape=(n, self.channels, self.img_size, self.img_size),
+                device=self.device, save_path=str(fid_dirs['val_fake'] / f"grid_valfid_epoch{epoch_idx+1}.png"),
             )
-            fake_list_val.append(denorm(fb.cpu(), self.channels))
+            fake_list_val.append(torch.nan_to_num(denorm(fbv.cpu(), self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0))
         fake_val = torch.cat(fake_list_val, dim=0)[:self.cfg.fid_eval_images]
         dump_images(fake_val, str(fid_dirs['val_fake']), prefix=f"{self.file_prefix}_fake")
+        # removed legacy duplicate val generation block
 
     def _save_checkpoints(self, epoch_val_loss: float, fid_val: float):
         if epoch_val_loss < self.best_val_loss:
@@ -306,12 +342,15 @@ class UnifiedTrainer:
                 self._collect_fake_sets(epoch, fid_dirs)
                 fid_train = compute_fid(str(fid_dirs['train_real']), str(fid_dirs['train_fake']), self.device)
                 fid_val   = compute_fid(str(fid_dirs['val_real']),   str(fid_dirs['val_fake']),   self.device)
-                # Clean up both train and validation epoch folders
-                for ep in ['train_epoch_dir', 'val_epoch_dir']:
-                    try:
-                        shutil.rmtree(fid_dirs.get(ep, Path("")), ignore_errors=True)
-                    except Exception:
-                        pass
+                # Optionally clean up both train and validation epoch folders
+                if not self.cfg.keep_fid_images:
+                    for ep in ['train_epoch_dir', 'val_epoch_dir']:
+                        try:
+                            shutil.rmtree(fid_dirs.get(ep, Path("")), ignore_errors=True)
+                        except Exception:
+                            pass
+                else:
+                    print(f"[fid] kept epoch {epoch+1} FID images at {fid_dirs['train_epoch_dir']} and {fid_dirs['val_epoch_dir']}")
             except Exception as e:
                 print(f"[warn|fid|{self.cfg.mode}|{self.ds_key}] epoch={epoch+1} FID pipeline failed: {e}")
                 fid_train, fid_val = float('nan'), float('nan')
@@ -337,7 +376,7 @@ class UnifiedTrainer:
             path, _ = sample(
                 self.model, self.ddpm,
                 shape=(self.cfg.n_sample, self.channels, self.img_size, self.img_size),
-                device=self.device, save_path=str(self.images_dir / f"{self.file_prefix}_samples_final.png"),
+                device=self.device, save_path=str(self.grid_dir / f"{self.file_prefix}_samples_final.png"),
             )
             p = Path(path)
             assert p.exists() and p.stat().st_size > 0, f"Final sample not saved: {path}"
@@ -396,6 +435,7 @@ def train_unified(
     # Deep Supervised Diffusion weights (for mode=="dsd")
     dsd_w_aux_eps: float = 0.5,
     dsd_w_aux_x0: float = 0.5,
+    keep_fid_images: bool = False,
 ):
     cfg = TrainConfig(
         save_root=save_root,
@@ -419,6 +459,7 @@ def train_unified(
         multi_variant=multi_variant,
         dsd_w_aux_eps=dsd_w_aux_eps,
         dsd_w_aux_x0=dsd_w_aux_x0,
+        keep_fid_images=keep_fid_images,
     )
     UnifiedTrainer(cfg).run()
 

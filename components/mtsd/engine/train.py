@@ -6,15 +6,23 @@ from tqdm import tqdm
 from sampling import sample
 from .validate import _rand_timesteps
 from losses import unified_loss, deep_supervised_loss
+# AMP autocast compatibility shim: prefer torch.amp API
 try:
-    from torch.cuda.amp import autocast
-except Exception:
+    from torch.amp import autocast as _amp_autocast  # type: ignore
     def autocast(enabled: bool = False):
-        from contextlib import contextmanager
-        @contextmanager
-        def _noop():
-            yield
-        return _noop()
+        return _amp_autocast('cuda', enabled=enabled)
+except Exception:
+    try:
+        from torch.cuda.amp import autocast as _cuda_autocast  # type: ignore
+        def autocast(enabled: bool = False):
+            return _cuda_autocast(enabled=enabled)
+    except Exception:
+        def autocast(enabled: bool = False):
+            from contextlib import contextmanager
+            @contextmanager
+            def _noop():
+                yield
+            return _noop()
 
 
 def train_one_epoch(trainer, epoch_idx: int):
@@ -69,7 +77,7 @@ def train_one_epoch(trainer, epoch_idx: int):
         if (trainer.step % cfg.sample_every) == 0:
             try:
                 with torch.no_grad():
-                    grid_path = trainer.images_dir / f"{trainer.file_prefix}_samples_step{trainer.step}.png"
+                    grid_path = trainer.grid_dir / f"{trainer.file_prefix}_samples_step{trainer.step}.png"
                     sample(model, ddpm,
                            shape=(cfg.n_sample, channels, img_size, img_size),
                            device=device, save_path=str(grid_path))

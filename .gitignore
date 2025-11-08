@@ -1,1 +1,4 @@
 data/*
+components/mtsd/runs/*
+*.pyc
+__pycache__/

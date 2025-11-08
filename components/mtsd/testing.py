@@ -22,6 +22,7 @@ def run_post_training_testing(
     datasets: List[str],
     with_dsd: bool = False,
     fid_eval_images: int = 1024,
+    keep_fid_images: bool = False,
 ) -> Path:
     """
     Evaluate best checkpoints on the test set (MSE + FID), save CSV summary and FID bar plots.
@@ -94,9 +95,10 @@ def run_post_training_testing(
                 test_fake_dir = ep_dir / "fake"
                 for d in [test_real_dir, test_fake_dir]:
                     d.mkdir(parents=True, exist_ok=True)
-                    # cleanup previous
-                    for f in d.glob("*.png"):
-                        f.unlink()
+                    # cleanup previous (only if not preserving)
+                    if not keep_fid_images:
+                        for f in d.glob("*.png"):
+                            f.unlink()
 
                 collected = 0
                 imgs_accum = []
@@ -133,11 +135,14 @@ def run_post_training_testing(
                     "mse_loss": mse_loss,
                     "fid_test": float(fid_test),
                 })
-                # Clean up temporary directories
-                try:
-                    shutil.rmtree(ep_dir, ignore_errors=True)
-                except Exception:
-                    pass
+                # Clean up temporary directories (optional)
+                if not keep_fid_images:
+                    try:
+                        shutil.rmtree(ep_dir, ignore_errors=True)
+                    except Exception:
+                        pass
+                else:
+                    print(f"[fid|test] kept evaluation images at {ep_dir}")
 
     # Save results CSV
     out_csv = metrics_dir / "test_summary.csv"

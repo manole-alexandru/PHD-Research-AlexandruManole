@@ -1,5 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
+import math
+import warnings
 import csv
 import torch
 from torchvision import utils as vutils
@@ -27,12 +29,69 @@ def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
     except Exception:
         print("torch-fidelity not found. Install with: pip install torch-fidelity")
         return float('nan')
-    metrics = calculate_metrics(
-        input1=real_dir, input2=fake_dir,
-        fid=True, isc=False, kid=False,
-        cuda=device.type == 'cuda', batch_size=64, verbose=False,
-    )
-    return float(metrics.get('frechet_inception_distance', float('nan')))
+    # Basic sanity: ensure there are images present in both folders
+    try:
+        r_count = len(list(Path(real_dir).glob('*.png')))
+        f_count = len(list(Path(fake_dir).glob('*.png')))
+        if r_count == 0 or f_count == 0:
+            print(f"[fid] Skipping FID: empty dirs real={r_count} fake={f_count} at {real_dir} | {fake_dir}")
+            return float('nan')
+    except Exception:
+        pass
+
+    def _calc(cuda_flag: bool):
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*TypedStorage is deprecated.*",
+                category=UserWarning,
+            )
+            return calculate_metrics(
+                input1=real_dir,
+                input2=fake_dir,
+                fid=True,
+                isc=False,
+                kid=False,
+                cuda=cuda_flag,
+                batch_size=64,
+                verbose=False,
+            )
+
+    use_cuda = (device.type == 'cuda') and torch.cuda.is_available()
+
+    # First try on GPU (if available)
+    if use_cuda:
+        try:
+            metrics = _calc(True)
+            fid_gpu = float(metrics.get('frechet_inception_distance', float('nan')))
+        except Exception as e:
+            print(f"[fid] GPU run failed ({e}); falling back to CPU.")
+            fid_gpu = float('nan')
+
+        if not (math.isfinite(fid_gpu)):
+            # Retry on CPU
+            try:
+                metrics_cpu = _calc(False)
+                fid_cpu = float(metrics_cpu.get('frechet_inception_distance', float('nan')))
+                if not math.isfinite(fid_cpu):
+                    print("[fid] CPU fallback also returned NaN/Inf FID.")
+                else:
+                    print("[fid] CPU fallback succeeded; using CPU FID.")
+                return fid_cpu
+            except Exception as e:
+                print(f"[fid] CPU fallback failed: {e}")
+                return float('nan')
+        else:
+            return fid_gpu
+
+    # CPU path
+    try:
+        metrics = _calc(False)
+        fid = float(metrics.get('frechet_inception_distance', float('nan')))
+        return fid
+    except Exception as e:
+        print(f"[fid] CPU FID calculation failed: {e}")
+        return float('nan')
 
 
 def ema_series(values, decay=0.98):
