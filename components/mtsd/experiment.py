@@ -79,7 +79,7 @@ if __name__ == "__main__":
 
     # Experiment folder: allow reusing a fixed directory via --exp-dir for cross-run aggregation
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    EXP_BASE = Path("/content/drive/MyDrive/prototypes/mtsd_exp")
+    EXP_BASE = Path("C:/Mano/profession/phd/PHD-Research-AlexandruManole/components/mt-sd/experiment/") # Path("/content/drive/MyDrive/prototypes/mtsd_exp")
     if args.exp_dir:
         EXP_ROOT = Path(args.exp_dir)
     else:
