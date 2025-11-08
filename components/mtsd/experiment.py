@@ -231,11 +231,16 @@ if __name__ == "__main__":
 
         # FID-only (single vs multi)
         plt.figure()
+        _plotted_any = False
         for label, color in [("single", "tab:blue"), ("multi", "tab:orange")]:
             ep, _, fidv = series.get(label, ([], [], []))
             if ep and fidv:
                 plt.plot(ep, fidv, label=label, color=color)
-        plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) - {ds} (single vs multi)"); plt.legend(); plt.tight_layout()
+                _plotted_any = True
+        plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) - {ds} (single vs multi)")
+        if _plotted_any:
+            plt.legend()
+        plt.tight_layout()
         out_fid_only = metrics_dir / f"{ds}_single_vs_multi_val_fid.png"
         plt.savefig(out_fid_only, dpi=150); plt.close()
         time.sleep(0.1)
@@ -246,11 +251,16 @@ if __name__ == "__main__":
 
         # Loss-only (single vs multi)
         plt.figure()
+        _plotted_any = False
         for label, color in [("single", "tab:blue"), ("multi", "tab:orange")]:
             ep, loss, _ = series.get(label, ([], [], []))
             if ep and loss:
                 plt.plot(ep, loss, label=label, color=color)
-        plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss - {ds} (single vs multi)"); plt.legend(); plt.tight_layout()
+                _plotted_any = True
+        plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss - {ds} (single vs multi)")
+        if _plotted_any:
+            plt.legend()
+        plt.tight_layout()
         out_loss_only = metrics_dir / f"{ds}_single_vs_multi_val_loss.png"
         plt.savefig(out_loss_only, dpi=150); plt.close()
         time.sleep(0.1)
@@ -274,11 +284,16 @@ if __name__ == "__main__":
         labels_colors = [("single", "tab:blue"), ("multi", "tab:orange")]
         if WITH_DSD:
             labels_colors.append(("dsd", "tab:green"))
+        _plotted_any = False
         for label, color in labels_colors:
             ep, loss, _ = series.get(label, ([], [], []))
             if ep and loss:
                 plt.plot(ep, loss, label=label, color=color)
-        plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss - {ds}"); plt.legend(); plt.tight_layout()
+                _plotted_any = True
+        plt.xlabel("epoch"); plt.ylabel("val loss"); plt.title(f"Validation Loss - {ds}")
+        if _plotted_any:
+            plt.legend()
+        plt.tight_layout()
         out_val_loss = metrics_dir / f"{ds}_compare_val_loss.png"
         plt.savefig(out_val_loss, dpi=150); plt.close()
         time.sleep(0.1)
@@ -289,11 +304,16 @@ if __name__ == "__main__":
 
         # FID (val) comparison
         plt.figure()
+        _plotted_any = False
         for label, color in labels_colors:
             ep, _, fidv = series.get(label, ([], [], []))
             if ep and fidv:
                 plt.plot(ep, fidv, label=label, color=color)
-        plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) - {ds}"); plt.legend(); plt.tight_layout()
+                _plotted_any = True
+        plt.xlabel("epoch"); plt.ylabel("FID (val)"); plt.title(f"FID (val) - {ds}")
+        if _plotted_any:
+            plt.legend()
+        plt.tight_layout()
         out_fid_val = metrics_dir / f"{ds}_compare_fid_val.png"
         plt.savefig(out_fid_val, dpi=150); plt.close()
         time.sleep(0.1)
