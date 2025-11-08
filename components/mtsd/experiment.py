@@ -107,7 +107,7 @@ if __name__ == "__main__":
 
     # Experiment folder: allow reusing a fixed directory via --exp-dir for cross-run aggregation
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    EXP_BASE = Path("C:/Mano/profession/phd/PHD-Research-AlexandruManole/components/mtsd/runs/") # Path("/content/drive/MyDrive/prototypes/mtsd_exp")
+    EXP_BASE = Path("/content/runs/") # Path("C:/Mano/profession/phd/PHD-Research-AlexandruManole/components/mtsd/runs/") # Path("/content/drive/MyDrive/prototypes/mtsd_exp")
     if args.exp_dir:
         EXP_ROOT = Path(args.exp_dir)
     else:
@@ -303,4 +303,10 @@ if __name__ == "__main__":
             raise AssertionError(f"Failed to save FID-val comparison plot '{out_fid_val}': {e}")
 
     # Evaluate best checkpoints on test set (extracted)
-    run_post_training_testing(EXP_ROOT, DATASETS, with_dsd=WITH_DSD, fid_eval_images=1024, keep_fid_images=bool(args.keep_fid_images))
+    run_post_training_testing(
+        EXP_ROOT,
+        DATASETS,
+        with_dsd=WITH_DSD,
+        fid_eval_images=int(cfg.get("FID_EVAL_IMAGES", 1024)),
+        keep_fid_images=bool(args.keep_fid_images),
+    )

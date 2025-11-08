@@ -151,6 +151,7 @@ class UnifiedTrainer:
         self.tr_epoch_loss_total: list[float] = []
         self.va_loss_main: list[float] = []
         self.va_loss_x0: list[float] = []
+        self.fid_train_hist: list[float] = []
         self.fid_val_hist: list[float] = []
         self.best_val_loss = float('inf')
         self.best_val_fid = float('inf')
@@ -163,43 +164,61 @@ class UnifiedTrainer:
         return evaluate_mse(self.model, self.ddpm, self.val_loader, self.device, self.cfg.mode == "multi")
 
     def _make_epoch_fid_dirs(self, epoch_idx: int):
-        """Create per-epoch FID directories for validation only and return them.
-        Layout: fid/{file_prefix}/epoch_{k}/val_real and val_fake
+        """Create per-epoch FID directories and return them.
+        Layout under fid/{file_prefix}/epoch_{k}/: train_real, train_fake, val_real, val_fake
         """
-        va_dir = self.fid_dir / f"epoch_{epoch_idx+1}"
-        va_real = va_dir / "val_real"
-        va_fake = va_dir / "val_fake"
-        for d in [va_real, va_fake]:
+        ep_dir = self.fid_dir / f"epoch_{epoch_idx+1}"
+        tr_real = ep_dir / "train_real"
+        tr_fake = ep_dir / "train_fake"
+        va_real = ep_dir / "val_real"
+        va_fake = ep_dir / "val_fake"
+        for d in [tr_real, tr_fake, va_real, va_fake]:
             d.mkdir(parents=True, exist_ok=True)
         return {
-            'val_epoch_dir': va_dir,
+            'epoch_dir': ep_dir,
+            'train_real': tr_real,
+            'train_fake': tr_fake,
             'val_real': va_real,
             'val_fake': va_fake,
         }
 
-    def _collect_val_sets(self, epoch_idx: int, fid_dirs):
-        # Val real
-        collected = 0; imgs_accum = []
+    def _collect_full_sets(self, epoch_idx: int, fid_dirs):
+        # Train real (stream)
+        idx = 0
+        for imgs, _ in self.train_fid_loader:
+            batch = torch.nan_to_num(denorm(imgs, self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
+            dump_images(batch, str(fid_dirs['train_real']), prefix=f"{self.file_prefix}_real", start_index=idx)
+            idx += batch.size(0)
+        # Val real (stream)
+        idx = 0
         for imgs, _ in self.val_loader:
-            imgs_accum.append(imgs)
-            collected += imgs.size(0)
-            if collected >= self.cfg.fid_eval_images: break
-        real_val = torch.cat(imgs_accum, dim=0)[:self.cfg.fid_eval_images]
-        real_val = denorm(real_val, self.channels)
-        real_val = torch.nan_to_num(real_val, nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
-        dump_images(real_val, str(fid_dirs['val_real']), prefix=f"{self.file_prefix}_real")
-        # Generate enough fake samples for validation FID as well
-        fake_list_val = []
-        while sum(x.size(0) for x in fake_list_val) < self.cfg.fid_eval_images:
-            n = min(self.cfg.fid_eval_images - sum(x.size(0) for x in fake_list_val), self.cfg.n_sample)
-            _, fbv = sample(
-                self.model, self.ddpm,
-                shape=(n, self.channels, self.img_size, self.img_size),
-                device=self.device, save_path=str(self.grid_dir / f"{self.file_prefix}_grid_valfid_epoch{epoch_idx+1}.png"),
-            )
-            fake_list_val.append(torch.nan_to_num(denorm(fbv.cpu(), self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0))
-        fake_val = torch.cat(fake_list_val, dim=0)[:self.cfg.fid_eval_images]
-        dump_images(fake_val, str(fid_dirs['val_fake']), prefix=f"{self.file_prefix}_fake")
+            batch = torch.nan_to_num(denorm(imgs, self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
+            dump_images(batch, str(fid_dirs['val_real']), prefix=f"{self.file_prefix}_real", start_index=idx)
+            idx += batch.size(0)
+        # Train fake to match train size
+        train_target = len(self.train_fid_loader.dataset)
+        written = 0
+        while written < train_target:
+            n = min(self.cfg.batch_size, train_target - written)
+            _, fb = sample(self.model, self.ddpm,
+                          shape=(n, self.channels, self.img_size, self.img_size),
+                          device=self.device,
+                          save_path=str(self.grid_dir / f"{self.file_prefix}_grid_trainfid_epoch{epoch_idx+1}.png"))
+            batch = torch.nan_to_num(denorm(fb.cpu(), self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
+            dump_images(batch, str(fid_dirs['train_fake']), prefix=f"{self.file_prefix}_fake", start_index=written)
+            written += batch.size(0)
+        # Val fake to match val size
+        val_target = len(self.val_loader.dataset)
+        written = 0
+        while written < val_target:
+            n = min(self.cfg.batch_size, val_target - written)
+            _, fbv = sample(self.model, self.ddpm,
+                            shape=(n, self.channels, self.img_size, self.img_size),
+                            device=self.device,
+                            save_path=str(self.grid_dir / f"{self.file_prefix}_grid_valfid_epoch{epoch_idx+1}.png"))
+            batch = torch.nan_to_num(denorm(fbv.cpu(), self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
+            dump_images(batch, str(fid_dirs['val_fake']), prefix=f"{self.file_prefix}_fake", start_index=written)
+            written += batch.size(0)
 
     def _save_checkpoints(self, epoch_val_loss: float, fid_val: float):
         if epoch_val_loss < self.best_val_loss:
@@ -245,8 +264,8 @@ class UnifiedTrainer:
             train_loss_cons=(self.tr_loss_cons if self.cfg.mode=="multi" else None),
             train_loss_total=(self.tr_loss_total if self.cfg.mode=="multi" else None),
             val_loss_x0=(self.va_loss_x0 if self.cfg.mode=="multi" else None),
-            fid_train=None,
-            fid_val=self.fid_val_hist,
+            fid_train=self.fid_train_hist,
+            fid_val=None,
             file_prefix=self.file_prefix,
         )
         # Additionally, persist per-epoch training vs validation losses
@@ -289,33 +308,32 @@ class UnifiedTrainer:
             if self.cfg.mode == "multi":
                 self.va_loss_x0.append(float(val_metrics["loss_x0"]))
 
-            # Prepare sets and compute FID (validation only)
+            # Prepare sets and compute FID (training subset only; test handled post-training)
             try:
-                # Create per-epoch dirs, compute FID (validation only), then optionally remove
                 fid_dirs = self._make_epoch_fid_dirs(epoch)
-                self._collect_val_sets(epoch, fid_dirs)
-                fid_val = compute_fid(str(fid_dirs['val_real']), str(fid_dirs['val_fake']), self.device)
-                # Optionally clean up validation epoch folder only
+                self._collect_train_subset(epoch, fid_dirs)
+                fid_train = compute_fid(str(fid_dirs['train_real']), str(fid_dirs['train_fake']), self.device, fid_batch_size=self.cfg.batch_size)
+                # Optionally clean up whole epoch dir
                 if not self.cfg.keep_fid_images:
                     try:
-                        shutil.rmtree(fid_dirs.get('val_epoch_dir', Path("")), ignore_errors=True)
+                        shutil.rmtree(fid_dirs.get('epoch_dir', Path("")), ignore_errors=True)
                     except Exception:
                         pass
                 else:
-                    print(f"[fid] kept epoch {epoch+1} validation FID images at {fid_dirs['val_epoch_dir']}")
+                    print(f"[fid] kept epoch {epoch+1} training FID images at {fid_dirs['epoch_dir']}")
             except Exception as e:
                 print(f"[warn|fid|{self.cfg.mode}|{self.ds_key}] epoch={epoch+1} FID pipeline failed: {e}")
-                fid_val = float('nan')
-            self.fid_val_hist.append(float(fid_val))
+                fid_train = float('nan')
+            self.fid_train_hist.append(float(fid_train))
 
-            # Save best checkpoints
-            self._save_checkpoints(self.va_loss_main[-1], fid_val)
+            # Save best checkpoints (track best by validation loss; best FID checkpoint based on test is handled after testing if desired)
+            self._save_checkpoints(self.va_loss_main[-1], float('inf'))
 
             # Validation log summary
             if self.cfg.mode == "multi":
-                print(f"[val] epoch {epoch+1}: loss={self.va_loss_main[-1]:.6f} | loss_x0={self.va_loss_x0[-1]:.6f} | FID_val={fid_val:.2f}")
+                print(f"[val] epoch {epoch+1}: loss={self.va_loss_main[-1]:.6f} | loss_x0={self.va_loss_x0[-1]:.6f} | FID_train={fid_train:.2f}")
             else:
-                print(f"[val] epoch {epoch+1}: loss={self.va_loss_main[-1]:.6f} | FID_val={fid_val:.2f}")
+                print(f"[val] epoch {epoch+1}: loss={self.va_loss_main[-1]:.6f} | FID_train={fid_train:.2f}")
 
             # Persist metrics/plots for this epoch
             self._save_metrics()

@@ -11,10 +11,10 @@ import matplotlib.pyplot as plt
 from metrics.metrics_logger import MetricsLogger
 
 
-def dump_images(tensor_bchw, out_dir: str, prefix: str = "img"):
+def dump_images(tensor_bchw, out_dir: str, prefix: str = "img", start_index: int = 0):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    for i, img in enumerate(tensor_bchw):
+    for i, img in enumerate(tensor_bchw, start=start_index):
         fp = out / f"{prefix}_{i:05d}.png"
         vutils.save_image(img, fp)
         try:
@@ -23,7 +23,7 @@ def dump_images(tensor_bchw, out_dir: str, prefix: str = "img"):
             raise AssertionError(f"Failed to save image '{fp}': {e}")
 
 
-def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
+def compute_fid(real_dir: str, fake_dir: str, device: torch.device, fid_batch_size: int | None = None):
     """Compute FID using torch-fidelity with robust fallbacks.
 
     - Validates that both folders contain PNGs
@@ -68,8 +68,9 @@ def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
 
     # First try on GPU (if available)
     if use_cuda:
+        bs = int(fid_batch_size) if fid_batch_size is not None else 64
         try:
-            metrics = _calc(True, batch_size=64)
+            metrics = _calc(True, batch_size=bs)
             fid_gpu = float(metrics.get('frechet_inception_distance', float('nan')))
         except Exception as e:
             print(f"[fid] GPU run failed ({e}); falling back to CPU.")
@@ -89,7 +90,7 @@ def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
 
             # Retry on CPU
             try:
-                metrics_cpu = _calc(False)
+                metrics_cpu = _calc(False, batch_size=bs)
                 fid_cpu = float(metrics_cpu.get('frechet_inception_distance', float('nan')))
                 if not math.isfinite(fid_cpu):
                     print("[fid] CPU fallback also returned NaN/Inf FID.")
@@ -104,7 +105,8 @@ def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
 
     # CPU path
     try:
-        metrics = _calc(False)
+        bs = int(fid_batch_size) if fid_batch_size is not None else 64
+        metrics = _calc(False, batch_size=bs)
         fid = float(metrics.get('frechet_inception_distance', float('nan')))
         return fid
     except Exception as e:
