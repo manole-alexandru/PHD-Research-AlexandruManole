@@ -80,6 +80,12 @@ if __name__ == "__main__":
         default=1,
         help="Experiment number/id to use when creating EXP_ROOT (ignored if --exp-dir is provided).",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Training DataLoader batch size.",
+    )
     args = parser.parse_args()
 
     data_choice = args.data.lower()
@@ -97,7 +103,7 @@ if __name__ == "__main__":
         DATASETS = ["cifar10", "mnist"]
 
     # Centralized constants (change once here)
-    EPOCHS = 3
+    EPOCHS = 10
     WITH_DSD = False
     TIMESTEPS = 200
     N_SAMPLE = 64
@@ -122,14 +128,14 @@ if __name__ == "__main__":
         "TIMESTEPS": TIMESTEPS,
         "N_SAMPLE": N_SAMPLE,
         "SAMPLE_EVERY": SAMPLE_EVERY,
-        "BATCH_SIZE": 128,
+        "BATCH_SIZE": int(args.batch_size),
         "LR": 2e-4,
         "BETA_START": 1e-4,
         "BETA_END": 0.02,
         "BASE": 32,
         "TIME_DIM": 128,
         "VAL_SPLIT": 0.05,
-        "FID_EVAL_IMAGES": 1024,
+        "FID_EVAL_IMAGES": 2048,
         "W_X0": 1.0,
         "W_CONSISTENCY": 0.1,
         "WITH_DSD": WITH_DSD,

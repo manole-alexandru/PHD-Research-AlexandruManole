@@ -24,10 +24,17 @@ def dump_images(tensor_bchw, out_dir: str, prefix: str = "img"):
 
 
 def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
+    """Compute FID using torch-fidelity with robust fallbacks.
+
+    - Validates that both folders contain PNGs
+    - Tries GPU first (batch_size=64), then GPU with batch_size=1
+    - Falls back to CPU if GPU result is non-finite or errors
+    - Suppresses noisy TypedStorage deprecation warnings
+    """
     try:
-        from cleanfid import fid as _cleanfid
+        from torch_fidelity import calculate_metrics
     except Exception:
-        print("clean-fid not found. Install with: pip install clean-fid")
+        print("torch-fidelity not found. Install with: pip install torch-fidelity")
         return float('nan')
     # Basic sanity: ensure there are images present in both folders
     try:
@@ -39,27 +46,31 @@ def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
     except Exception:
         pass
 
-    def _calc(dev_str: str, batch_size: int = 64):
+    def _calc(cuda_flag: bool, batch_size: int = 64):
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
                 message=r".*TypedStorage is deprecated.*",
                 category=UserWarning,
             )
-            return float(_cleanfid.compute_fid(
-                real_dir,
-                fake_dir,
-                device=dev_str,
-                num_workers=0,
+            return calculate_metrics(
+                input1=real_dir,
+                input2=fake_dir,
+                fid=True,
+                isc=False,
+                kid=False,
+                cuda=cuda_flag,
                 batch_size=batch_size,
-            ))
+                verbose=False,
+            )
 
     use_cuda = (device.type == 'cuda') and torch.cuda.is_available()
 
     # First try on GPU (if available)
     if use_cuda:
         try:
-            fid_gpu = _calc('cuda', batch_size=64)
+            metrics = _calc(True, batch_size=64)
+            fid_gpu = float(metrics.get('frechet_inception_distance', float('nan')))
         except Exception as e:
             print(f"[fid] GPU run failed ({e}); falling back to CPU.")
             fid_gpu = float('nan')
@@ -68,7 +79,8 @@ def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
             # Workaround: some PyTorch/torch-fidelity combos fail to collate GPU batches
             # due to non-resizable storages. Retry on GPU with batch_size=1.
             try:
-                fid_gpu_b1 = _calc('cuda', batch_size=1)
+                metrics_gpu_b1 = _calc(True, batch_size=1)
+                fid_gpu_b1 = float(metrics_gpu_b1.get('frechet_inception_distance', float('nan')))
                 if math.isfinite(fid_gpu_b1):
                     print("[fid] GPU retry with batch_size=1 succeeded; using GPU FID.")
                     return fid_gpu_b1
@@ -77,7 +89,8 @@ def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
 
             # Retry on CPU
             try:
-                fid_cpu = _calc('cpu')
+                metrics_cpu = _calc(False)
+                fid_cpu = float(metrics_cpu.get('frechet_inception_distance', float('nan')))
                 if not math.isfinite(fid_cpu):
                     print("[fid] CPU fallback also returned NaN/Inf FID.")
                 else:
@@ -91,7 +104,8 @@ def compute_fid(real_dir: str, fake_dir: str, device: torch.device):
 
     # CPU path
     try:
-        fid = _calc('cpu')
+        metrics = _calc(False)
+        fid = float(metrics.get('frechet_inception_distance', float('nan')))
         return fid
     except Exception as e:
         print(f"[fid] CPU FID calculation failed: {e}")
