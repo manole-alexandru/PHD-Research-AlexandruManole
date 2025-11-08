@@ -201,24 +201,32 @@ if __name__ == "__main__":
 
     def _read_val_metrics(prefix: str):
         path = metrics_dir / f"{prefix}_val_metrics.csv"
-        epochs, losses, loss_x0, fid_train, fid_val = [], [], [], [], []
+        out = {
+            'epochs': [], 'loss': [], 'loss_x0': [],
+            'fid_train': [], 'fid_val': [],
+            'fid_train_eps': [], 'fid_train_x0': [], 'fid_train_combined': [],
+            'fid_val_eps': [], 'fid_val_x0': [], 'fid_val_combined': [],
+        }
         if not path.exists():
-            return epochs, losses, loss_x0, fid_train, fid_val
+            return out
         with open(path, "r", newline="") as f:
             r = csv.DictReader(f)
             for row in r:
                 try:
-                    epochs.append(int(float(row.get("epoch", 0))))
-                    losses.append(float(row.get("loss", "nan")))
+                    out['epochs'].append(int(float(row.get("epoch", 0))))
+                    out['loss'].append(float(row.get("loss", "nan")))
                     if "loss_x0" in row and row.get("loss_x0", "") != "":
-                        loss_x0.append(float(row.get("loss_x0", "nan")))
-                    if "fid_train" in row and row.get("fid_train", "") != "":
-                        fid_train.append(float(row.get("fid_train", "nan")))
-                    if "fid_val" in row and row.get("fid_val", "") != "":
-                        fid_val.append(float(row.get("fid_val", "nan")))
+                        out['loss_x0'].append(float(row.get("loss_x0", "nan")))
+                    for k in [
+                        'fid_train', 'fid_val',
+                        'fid_train_eps', 'fid_train_x0', 'fid_train_combined',
+                        'fid_val_eps', 'fid_val_x0', 'fid_val_combined',
+                    ]:
+                        if k in row and row.get(k, "") != "":
+                            out[k].append(float(row.get(k, 'nan')))
                 except Exception:
                     continue
-        return epochs, losses, loss_x0, fid_train, fid_val
+        return out
 
     # If --eval is not set, skip all post-train evaluation steps
     # if not args.eval:
@@ -228,14 +236,24 @@ if __name__ == "__main__":
     for ds in DATASETS:
         for mode, color in [("single", "tab:blue"), ("multi", "tab:orange")]:
             prefix = f"{ds}_{mode}"
-            ep, _, _, fid_tr, fid_v = _read_val_metrics(prefix)
-            if not ep or (not fid_tr and not fid_v):
+            M = _read_val_metrics(prefix)
+            ep = M['epochs']
+            if not ep:
                 continue
             plt.figure()
-            if fid_tr:
-                plt.plot(ep[:len(fid_tr)], fid_tr, label="FID (train)", color=color, linestyle="-")
-            if fid_v:
-                plt.plot(ep[:len(fid_v)], fid_v, label="FID (val)", color=color, linestyle=":")
+            if mode == 'single':
+                fid_tr = M['fid_train']
+                fid_v = M['fid_val']
+                if fid_tr:
+                    plt.plot(ep[:len(fid_tr)], fid_tr, label="FID (train)", color=color, linestyle="-")
+                if fid_v:
+                    plt.plot(ep[:len(fid_v)], fid_v, label="FID (val)", color=color, linestyle=":")
+            else:
+                # Plot multi-task variants
+                for mg, col in [("eps", "tab:orange"), ("x0", "tab:red"), ("combined", "tab:purple")]:
+                    fid_v = M.get(f"fid_val_{mg}", [])
+                    if fid_v:
+                        plt.plot(ep[:len(fid_v)], fid_v, label=f"FID (val {mg})", color=col)
             plt.xlabel("epoch"); plt.ylabel("FID"); plt.title(f"FID per Epoch - {ds} ({mode})"); plt.legend(); plt.tight_layout()
             out_fid = metrics_dir / f"{prefix}_fid_per_epoch.png"
             plt.savefig(out_fid, dpi=150); plt.close()
@@ -244,16 +262,20 @@ if __name__ == "__main__":
 
     # Combined single vs multi: one figure with (left) FID evolution, (right) loss evolution
     for ds in DATASETS:
-        single = _read_val_metrics(f"{ds}_single")
-        multi  = _read_val_metrics(f"{ds}_multi")
-        ep_s, loss_s, _, fid_tr_s, fid_v_s = single
-        ep_m, loss_m, loss_m_x0, fid_tr_m, fid_v_m = multi
+        M_s = _read_val_metrics(f"{ds}_single")
+        M_m = _read_val_metrics(f"{ds}_multi")
+        ep_s, loss_s = M_s['epochs'], M_s['loss']
+        ep_m, loss_m = M_m['epochs'], M_m['loss']
+        loss_m_x0 = M_m['loss_x0']
         if not ep_s or not ep_m:
             continue
-        # Choose FID series preference: val if available else train
-        fid_s = fid_v_s if fid_v_s else fid_tr_s
-        fid_m = fid_v_m if fid_v_m else fid_tr_m
-        if not fid_s and not fid_m:
+        # Choose FID series for single
+        fid_s = M_s['fid_val'] if M_s['fid_val'] else M_s['fid_train']
+        # Multi-task: use three variant val series if present
+        fid_m_eps = M_m['fid_val_eps'] if M_m['fid_val_eps'] else M_m['fid_train_eps']
+        fid_m_x0 = M_m['fid_val_x0'] if M_m['fid_val_x0'] else M_m['fid_train_x0']
+        fid_m_comb = M_m['fid_val_combined'] if M_m['fid_val_combined'] else M_m['fid_train_combined']
+        if not fid_s and not (fid_m_eps or fid_m_x0 or fid_m_comb):
             # still create the figure to show loss comparison
             pass
         # Build the combined figure
@@ -264,9 +286,15 @@ if __name__ == "__main__":
         if fid_s:
             ax_fid.plot(ep_s[:len(fid_s)], fid_s, label="single", color="tab:blue")
             plotted_any = True
-        if fid_m:
-            ax_fid.plot(ep_m[:len(fid_m)], fid_m, label="multi", color="tab:orange")
-            plotted_any = True
+        # Multi variants
+        for series, lab, col in [
+            (fid_m_eps, "multi (eps)", "tab:orange"),
+            (fid_m_x0, "multi (x0)", "tab:red"),
+            (fid_m_comb, "multi (combined)", "tab:purple"),
+        ]:
+            if series:
+                ax_fid.plot(ep_m[:len(series)], series, label=lab, color=col)
+                plotted_any = True
         ax_fid.set_xlabel("epoch"); ax_fid.set_ylabel("FID"); ax_fid.set_title(f"FID per Epoch - {ds}")
         if plotted_any:
             ax_fid.legend()

@@ -66,6 +66,13 @@ class MetricsLogger:
         val_loss_x0: Optional[Sequence[float]] = None,
         fid_train: Optional[Sequence[float]] = None,
         fid_val: Optional[Sequence[float]] = None,
+        # Optional multi-task variant FIDs
+        fid_train_eps: Optional[Sequence[float]] = None,
+        fid_train_x0: Optional[Sequence[float]] = None,
+        fid_train_combined: Optional[Sequence[float]] = None,
+        fid_val_eps: Optional[Sequence[float]] = None,
+        fid_val_x0: Optional[Sequence[float]] = None,
+        fid_val_combined: Optional[Sequence[float]] = None,
     ) -> Path:
         val_csv = self.out_dir / f"{self.prefix}val_metrics.csv"
         with open(val_csv, "w", newline="") as f:
@@ -74,12 +81,25 @@ class MetricsLogger:
             if val_loss_x0 is not None: header += ["loss_x0"]
             if fid_train is not None: header += ["fid_train"]
             if fid_val is not None: header += ["fid_val"]
+            # Multi-variant columns (optional)
+            if fid_train_eps is not None: header += ["fid_train_eps"]
+            if fid_train_x0 is not None: header += ["fid_train_x0"]
+            if fid_train_combined is not None: header += ["fid_train_combined"]
+            if fid_val_eps is not None: header += ["fid_val_eps"]
+            if fid_val_x0 is not None: header += ["fid_val_x0"]
+            if fid_val_combined is not None: header += ["fid_val_combined"]
             w.writerow(header)
             for j, ep in enumerate(val_epochs):
                 row = [ep, val_loss_main[j]]
                 if val_loss_x0 is not None: row += [val_loss_x0[j]]
                 if fid_train is not None: row += [fid_train[j]]
                 if fid_val is not None: row += [fid_val[j]]
+                if fid_train_eps is not None: row += [fid_train_eps[j]]
+                if fid_train_x0 is not None: row += [fid_train_x0[j]]
+                if fid_train_combined is not None: row += [fid_train_combined[j]]
+                if fid_val_eps is not None: row += [fid_val_eps[j]]
+                if fid_val_x0 is not None: row += [fid_val_x0[j]]
+                if fid_val_combined is not None: row += [fid_val_combined[j]]
                 w.writerow(row)
         time.sleep(0.1)
         assert val_csv.exists() and val_csv.stat().st_size > 0, f"Val CSV not saved: {val_csv}"
@@ -135,12 +155,31 @@ class MetricsLogger:
         assert pl.exists() and pl.stat().st_size > 0, f"Plot not saved: {pl}"
         return pl
 
-    def plot_fid(self, val_epochs: Sequence[int], fid_train: Optional[Sequence[float]] = None, fid_val: Optional[Sequence[float]] = None) -> Optional[Path]:
-        if fid_train is None and fid_val is None:
+    def plot_fid(
+        self,
+        val_epochs: Sequence[int],
+        fid_train: Optional[Sequence[float]] = None,
+        fid_val: Optional[Sequence[float]] = None,
+        # Optional multi-task variant FIDs
+        fid_train_eps: Optional[Sequence[float]] = None,
+        fid_train_x0: Optional[Sequence[float]] = None,
+        fid_train_combined: Optional[Sequence[float]] = None,
+        fid_val_eps: Optional[Sequence[float]] = None,
+        fid_val_x0: Optional[Sequence[float]] = None,
+        fid_val_combined: Optional[Sequence[float]] = None,
+    ) -> Optional[Path]:
+        if all(x is None for x in [fid_train, fid_val, fid_train_eps, fid_train_x0, fid_train_combined, fid_val_eps, fid_val_x0, fid_val_combined]):
             return None
         plt.figure()
         if fid_train is not None: plt.plot(val_epochs, fid_train, label="FID (train)")
         if fid_val is not None:   plt.plot(val_epochs, fid_val,   label="FID (val)")
+        # Variants
+        if fid_train_eps is not None: plt.plot(val_epochs, fid_train_eps, label="FID tr (eps)")
+        if fid_train_x0 is not None: plt.plot(val_epochs, fid_train_x0, label="FID tr (x0)")
+        if fid_train_combined is not None: plt.plot(val_epochs, fid_train_combined, label="FID tr (combined)")
+        if fid_val_eps is not None: plt.plot(val_epochs, fid_val_eps, label="FID val (eps)", linestyle=":")
+        if fid_val_x0 is not None: plt.plot(val_epochs, fid_val_x0, label="FID val (x0)", linestyle=":")
+        if fid_val_combined is not None: plt.plot(val_epochs, fid_val_combined, label="FID val (combined)", linestyle=":")
         plt.xlabel("epoch"); plt.ylabel("FID"); plt.title("FID over epochs"); plt.legend(); plt.tight_layout()
         pl = self.out_dir / f"{self.prefix}fid.png"
         plt.savefig(pl, dpi=150); plt.close()
@@ -210,6 +249,13 @@ class MetricsLogger:
         val_loss_x0: Optional[Sequence[float]] = None,
         fid_train: Optional[Sequence[float]] = None,
         fid_val: Optional[Sequence[float]] = None,
+        # Optional multi-variant FIDs
+        fid_train_eps: Optional[Sequence[float]] = None,
+        fid_train_x0: Optional[Sequence[float]] = None,
+        fid_train_combined: Optional[Sequence[float]] = None,
+        fid_val_eps: Optional[Sequence[float]] = None,
+        fid_val_x0: Optional[Sequence[float]] = None,
+        fid_val_combined: Optional[Sequence[float]] = None,
     ) -> dict:
         # Only write CSVs; figures are generated by higher-level routines.
         train_csv = self.write_train_csv(
@@ -223,6 +269,12 @@ class MetricsLogger:
             val_epochs, val_loss_main,
             val_loss_x0=val_loss_x0,
             fid_train=fid_train, fid_val=fid_val,
+            fid_train_eps=fid_train_eps,
+            fid_train_x0=fid_train_x0,
+            fid_train_combined=fid_train_combined,
+            fid_val_eps=fid_val_eps,
+            fid_val_x0=fid_val_x0,
+            fid_val_combined=fid_val_combined,
         )
         return {
             'train_csv': train_csv,

@@ -23,6 +23,9 @@ def run_post_training_testing(
     with_dsd: bool = False,
     fid_eval_images: int = 1024,
     keep_fid_images: bool = False,
+    # For multi-task models, which generation variants to evaluate
+    multi_gen_variants: List[str] | None = None,
+    combine_weight: float = 0.5,
 ) -> Path:
     """
     Evaluate best checkpoints on the test set (MSE + FID), save CSV summary and FID bar plots.
@@ -43,6 +46,8 @@ def run_post_training_testing(
     ckpt_dir = exp_root / "checkpoints"
 
     results = []
+    if multi_gen_variants is None:
+        multi_gen_variants = ["eps", "x0", "combined"]
     for ds in datasets:
         ds_key = ds
         channels = 1 if ds_key == "mnist" else 3
@@ -83,71 +88,78 @@ def run_post_training_testing(
                     )
                 ).to(device)
 
-                # MSE on test set
-                from training import evaluate_mse_unified  # local import to avoid cycles  # type: ignore
-                metrics = evaluate_mse_unified(model, ddpm, test_loader, device, multi_task=(mode == "multi"))
-                mse_loss = float(metrics["loss"]) if metrics and ("loss" in metrics) else float('nan')
+                # Evaluate one or more generation variants
+                eval_gen_modes = multi_gen_variants if mode == "multi" else ["eps"]
+                for gen_mode in eval_gen_modes:
+                    # MSE on test set
+                    from training import evaluate_mse_unified  # local import to avoid cycles  # type: ignore
+                    metrics = evaluate_mse_unified(model, ddpm, test_loader, device, multi_task=(mode == "multi"))
+                    mse_loss = float(metrics["loss"]) if metrics and ("loss" in metrics) else float('nan')
 
-                # FID on test set: prepare real test and fake samples
-                # Use a temporary per-evaluation epoch-like directory and clean it after FID
-                ep_dir = fid_dir / f"{file_prefix}_test" / "epoch_eval"
-                test_real_dir = ep_dir / "real"
-                test_fake_dir = ep_dir / "fake"
-                for d in [test_real_dir, test_fake_dir]:
-                    d.mkdir(parents=True, exist_ok=True)
-                    # cleanup previous (only if not preserving)
+                    # FID on test set: prepare real test and fake samples
+                    # Use a per-variant temp directory and clean it after FID
+                    file_prefix_variant = f"{file_prefix}_{gen_mode}" if mode == "multi" else file_prefix
+                    ep_dir = fid_dir / f"{file_prefix_variant}_test" / "epoch_eval"
+                    test_real_dir = ep_dir / "real"
+                    test_fake_dir = ep_dir / "fake"
+                    for d in [test_real_dir, test_fake_dir]:
+                        d.mkdir(parents=True, exist_ok=True)
+                        # cleanup previous (only if not preserving)
+                        if not keep_fid_images:
+                            for f in d.glob("*.png"):
+                                f.unlink()
+
+                    collected = 0
+                    imgs_accum = []
+                    for imgs, _ in test_loader:
+                        imgs_accum.append(imgs)
+                        collected += imgs.size(0)
+                        if collected >= fid_eval_images:
+                            break
+                    real_test = torch.cat(imgs_accum, dim=0)[:fid_eval_images]
+                    real_test = denorm(real_test, channels)
+                    dump_images(real_test, str(test_real_dir), prefix="real")
+
+                    # fake
+                    n_sample = 64
+                    fake_list = []
+                    while sum(x.size(0) for x in fake_list) < fid_eval_images:
+                        n = min(fid_eval_images - sum(x.size(0) for x in fake_list), n_sample)
+                        _, fb = sample(
+                            model,
+                            ddpm,
+                            shape=(n, channels, img_size, img_size),
+                            device=device,
+                            save_path=str((exp_root / "images") / "_tmp_test.png"),
+                            multi_gen=gen_mode,  # new multi-task generation mode
+                            combine_weight=combine_weight,
+                        )
+                        fake_list.append(denorm(fb.cpu(), channels))
+                    fake_test = torch.cat(fake_list, dim=0)[:fid_eval_images]
+                    dump_images(fake_test, str(test_fake_dir), prefix="fake")
+
+                    fid_test = compute_fid(str(test_real_dir), str(test_fake_dir), device)
+                    results.append({
+                        "dataset": ds_key,
+                        "mode": mode,
+                        "checkpoint": tag,
+                        "multi_gen": (gen_mode if mode == "multi" else None),
+                        "mse_loss": mse_loss,
+                        "fid_test": float(fid_test),
+                    })
+                    # Clean up temporary directories (optional)
                     if not keep_fid_images:
-                        for f in d.glob("*.png"):
-                            f.unlink()
-
-                collected = 0
-                imgs_accum = []
-                for imgs, _ in test_loader:
-                    imgs_accum.append(imgs)
-                    collected += imgs.size(0)
-                    if collected >= fid_eval_images:
-                        break
-                real_test = torch.cat(imgs_accum, dim=0)[:fid_eval_images]
-                real_test = denorm(real_test, channels)
-                dump_images(real_test, str(test_real_dir), prefix="real")
-
-                # fake
-                n_sample = 64
-                fake_list = []
-                while sum(x.size(0) for x in fake_list) < fid_eval_images:
-                    n = min(fid_eval_images - sum(x.size(0) for x in fake_list), n_sample)
-                    _, fb = sample(
-                        model,
-                        ddpm,
-                        shape=(n, channels, img_size, img_size),
-                        device=device,
-                        save_path=str((exp_root / "images") / "_tmp_test.png"),
-                    )
-                    fake_list.append(denorm(fb.cpu(), channels))
-                fake_test = torch.cat(fake_list, dim=0)[:fid_eval_images]
-                dump_images(fake_test, str(test_fake_dir), prefix="fake")
-
-                fid_test = compute_fid(str(test_real_dir), str(test_fake_dir), device)
-                results.append({
-                    "dataset": ds_key,
-                    "mode": mode,
-                    "checkpoint": tag,
-                    "mse_loss": mse_loss,
-                    "fid_test": float(fid_test),
-                })
-                # Clean up temporary directories (optional)
-                if not keep_fid_images:
-                    try:
-                        shutil.rmtree(ep_dir, ignore_errors=True)
-                    except Exception:
-                        pass
-                else:
-                    print(f"[fid|test] kept evaluation images at {ep_dir}")
+                        try:
+                            shutil.rmtree(ep_dir, ignore_errors=True)
+                        except Exception:
+                            pass
+                    else:
+                        print(f"[fid|test] kept evaluation images at {ep_dir}")
 
     # Save results CSV
     out_csv = metrics_dir / "test_summary.csv"
     with open(out_csv, "w", newline="") as f:
-        writer = _csv.DictWriter(f, fieldnames=["dataset", "mode", "checkpoint", "mse_loss", "fid_test"])
+        writer = _csv.DictWriter(f, fieldnames=["dataset", "mode", "checkpoint", "multi_gen", "mse_loss", "fid_test"])
         writer.writeheader()
         for row in results:
             writer.writerow(row)
@@ -156,14 +168,27 @@ def run_post_training_testing(
 
     # Single aggregate bar plot: all datasets × modes (and checkpoints)
     if results:
-        labels = [f"{r['dataset']}|{r['mode']}|{r['checkpoint']}" for r in results]
+        def _lbl(r):
+            if r.get('multi_gen'):
+                return f"{r['dataset']}|{r['mode']}:{r['multi_gen']}|{r['checkpoint']}"
+            return f"{r['dataset']}|{r['mode']}|{r['checkpoint']}"
+        labels = [_lbl(r) for r in results]
         values = [r['fid_test'] for r in results]
         colors = []
         for r in results:
             if r['mode'] == 'single':
                 colors.append('tab:blue')
             elif r['mode'] == 'multi':
-                colors.append('tab:orange')
+                # Slight differentiation for variant types
+                mg = r.get('multi_gen') or ''
+                if mg == 'eps':
+                    colors.append('tab:orange')
+                elif mg == 'x0':
+                    colors.append('tab:red')
+                elif mg == 'combined':
+                    colors.append('tab:purple')
+                else:
+                    colors.append('tab:orange')
             else:
                 colors.append('tab:green')
         plt.figure(figsize=(max(10, len(labels) * 0.6), 4))

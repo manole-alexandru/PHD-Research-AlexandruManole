@@ -148,8 +148,17 @@ class UnifiedTrainer:
         self.va_loss_x0: list[float] = []
         self.fid_train_hist: list[float] = []
         self.fid_val_hist: list[float] = []
+        # Variant-specific FID histories (multi-task only; eps also used as generic)
+        self.fid_train_hist_eps: list[float] = []
+        self.fid_train_hist_x0: list[float] = []
+        self.fid_train_hist_combined: list[float] = []
+        self.fid_val_hist_eps: list[float] = []
+        self.fid_val_hist_x0: list[float] = []
+        self.fid_val_hist_combined: list[float] = []
         self.best_val_loss = float('inf')
         self.best_val_fid = float('inf')
+        # Track best FID per generation mode (for multi-task)
+        self.best_val_fid_by_mode = {"eps": float('inf'), "x0": float('inf'), "combined": float('inf')}
 
     def train_epoch(self, epoch_idx: int):
         return train_one_epoch(self, epoch_idx)
@@ -160,25 +169,35 @@ class UnifiedTrainer:
 
     def _make_epoch_fid_dirs(self, epoch_idx: int):
         """Create per-epoch FID directories and return them.
-        Layout under fid/{file_prefix}/epoch_{k}/: train_real, train_fake, val_real, val_fake
+        Layout under fid/{file_prefix}/epoch_{k}/:
+          train_real, val_real, and variant-specific fakes for eps/x0/combined.
         """
         ep_dir = self.fid_dir / f"epoch_{epoch_idx+1}"
         tr_real = ep_dir / "train_real"
-        tr_fake = ep_dir / "train_fake"
         va_real = ep_dir / "val_real"
-        va_fake = ep_dir / "val_fake"
-        for d in [tr_real, tr_fake, va_real, va_fake]:
+        # Variant-specific fake folders
+        tr_fake_eps = ep_dir / "train_fake_eps"
+        tr_fake_x0 = ep_dir / "train_fake_x0"
+        tr_fake_combined = ep_dir / "train_fake_combined"
+        va_fake_eps = ep_dir / "val_fake_eps"
+        va_fake_x0 = ep_dir / "val_fake_x0"
+        va_fake_combined = ep_dir / "val_fake_combined"
+        for d in [tr_real, va_real, tr_fake_eps, tr_fake_x0, tr_fake_combined, va_fake_eps, va_fake_x0, va_fake_combined]:
             d.mkdir(parents=True, exist_ok=True)
         return {
             'epoch_dir': ep_dir,
             'train_real': tr_real,
-            'train_fake': tr_fake,
             'val_real': va_real,
-            'val_fake': va_fake,
+            'train_fake_eps': tr_fake_eps,
+            'train_fake_x0': tr_fake_x0,
+            'train_fake_combined': tr_fake_combined,
+            'val_fake_eps': va_fake_eps,
+            'val_fake_x0': va_fake_x0,
+            'val_fake_combined': va_fake_combined,
         }
 
     @torch.no_grad()
-    def _collect_train_subset(self, epoch_idx: int, fid_dirs):
+    def _collect_train_subset(self, epoch_idx: int, fid_dirs, multi_gen: str = "eps"):
         """Prepare a subset of the training set for FID using cfg.fid_eval_images.
 
         Writes PNGs into train_real and train_fake under the epoch folder.
@@ -204,14 +223,15 @@ class UnifiedTrainer:
                 self.ddpm,
                 shape=(n, self.channels, self.img_size, self.img_size),
                 device=self.device,
-                save_path=str(self.grid_dir / f"{self.file_prefix}_grid_trainfid_epoch{epoch_idx+1}.png"),
+                save_path=str(self.grid_dir / f"{self.file_prefix}_grid_trainfid_{multi_gen}_epoch{epoch_idx+1}.png"),
+                multi_gen=multi_gen,
             )
             batch = torch.nan_to_num(denorm(fb.cpu(), self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
-            dump_images(batch, str(fid_dirs['train_fake']), prefix=f"{self.file_prefix}_fake", start_index=written)
+            dump_images(batch, str(fid_dirs[f'train_fake_{multi_gen}']), prefix=f"{self.file_prefix}_fake", start_index=written)
             written += batch.size(0)
 
     @torch.no_grad()
-    def _collect_val_subset(self, epoch_idx: int, fid_dirs):
+    def _collect_val_subset(self, epoch_idx: int, fid_dirs, multi_gen: str = "eps"):
         """Prepare a subset of the validation set for FID using cfg.fid_eval_images.
 
         Writes PNGs into val_real and val_fake under the epoch folder.
@@ -237,10 +257,11 @@ class UnifiedTrainer:
                 self.ddpm,
                 shape=(n, self.channels, self.img_size, self.img_size),
                 device=self.device,
-                save_path=str(self.grid_dir / f"{self.file_prefix}_grid_valfid_epoch{epoch_idx+1}.png"),
+                save_path=str(self.grid_dir / f"{self.file_prefix}_grid_valfid_{multi_gen}_epoch{epoch_idx+1}.png"),
+                multi_gen=multi_gen,
             )
             batch = torch.nan_to_num(denorm(fb.cpu(), self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
-            dump_images(batch, str(fid_dirs['val_fake']), prefix=f"{self.file_prefix}_fake", start_index=written)
+            dump_images(batch, str(fid_dirs[f'val_fake_{multi_gen}']), prefix=f"{self.file_prefix}_fake", start_index=written)
             written += batch.size(0)
 
     def _collect_full_sets(self, epoch_idx: int, fid_dirs):
@@ -313,6 +334,29 @@ class UnifiedTrainer:
             }, _ckpt_fid)
             assert _ckpt_fid.exists() and _ckpt_fid.stat().st_size > 0, f"Checkpoint not saved: {_ckpt_fid}"
 
+    def _save_best_fid_per_variant(self, fid_val_by_mode: Dict[str, float]):
+        for mg in ["eps", "x0", "combined"]:
+            v = fid_val_by_mode.get(mg, float('inf'))
+            try:
+                v = float(v)
+            except Exception:
+                continue
+            if v < self.best_val_fid_by_mode.get(mg, float('inf')):
+                self.best_val_fid_by_mode[mg] = v
+                _ckpt = self.ckpt_dir / f"{self.file_prefix}_{mg}_best_fid.pt"
+                torch.save({
+                    'state_dict': self.model.state_dict(),
+                    'mode': self.cfg.mode,
+                    'ds_key': self.ds_key,
+                    'base': self.cfg.base,
+                    'time_dim': self.cfg.time_dim,
+                    'channels': self.channels,
+                    'timesteps': self.cfg.timesteps,
+                    'beta_start': self.cfg.beta_start,
+                    'beta_end': self.cfg.beta_end,
+                }, _ckpt)
+                assert _ckpt.exists() and _ckpt.stat().st_size > 0, f"Checkpoint not saved: {_ckpt}"
+
     def _save_metrics(self):
         # Persist per-epoch metrics to CSVs (train per-epoch, not per-step)
         epochs = list(range(1, len(self.tr_epoch_loss_main)+1))
@@ -329,6 +373,12 @@ class UnifiedTrainer:
             val_loss_x0=(self.va_loss_x0 if self.cfg.mode=="multi" else None),
             fid_train=self.fid_train_hist,
             fid_val=self.fid_val_hist,
+            fid_train_eps=(self.fid_train_hist_eps if self.fid_train_hist_eps else None),
+            fid_train_x0=(self.fid_train_hist_x0 if self.cfg.mode=="multi" else None),
+            fid_train_combined=(self.fid_train_hist_combined if self.cfg.mode=="multi" else None),
+            fid_val_eps=(self.fid_val_hist_eps if self.fid_val_hist_eps else None),
+            fid_val_x0=(self.fid_val_hist_x0 if self.cfg.mode=="multi" else None),
+            fid_val_combined=(self.fid_val_hist_combined if self.cfg.mode=="multi" else None),
             file_prefix=self.file_prefix,
         )
         # Additionally, persist per-epoch training vs validation losses
@@ -366,36 +416,38 @@ class UnifiedTrainer:
                 self.tr_epoch_loss_cons.append(float(avg.get('loss_cons', float('nan'))))
                 self.tr_epoch_loss_total.append(float(avg.get('loss_total', float('nan'))))
 
-            # For multi-task, log a grid once per epoch (not per step)
+            # For multi-task, log grids for all generation variants once per epoch
             if self.cfg.mode == "multi":
-                try:
-                    with torch.no_grad():
-                        grid_path = self.grid_dir / f"{self.file_prefix}_samples_epoch{epoch+1}.png"
-                        sample(self.model, self.ddpm,
-                               shape=(self.cfg.n_sample, self.channels, self.img_size, self.img_size),
-                               device=self.device, save_path=str(grid_path))
-                except Exception as e:
-                    print(f"[warn|sample-grid-epoch|multi|{self.ds_key}] epoch={epoch+1} failed: {e}")
+                for mg in ["eps", "x0", "combined"]:
+                    try:
+                        with torch.no_grad():
+                            grid_path = self.grid_dir / f"{self.file_prefix}_{mg}_samples_epoch{epoch+1}.png"
+                            sample(self.model, self.ddpm,
+                                   shape=(self.cfg.n_sample, self.channels, self.img_size, self.img_size),
+                                   device=self.device, save_path=str(grid_path), multi_gen=mg)
+                    except Exception as e:
+                        print(f"[warn|sample-grid-epoch|multi|{self.ds_key}] mode={mg} epoch={epoch+1} failed: {e}")
 
             val_metrics = self.evaluate_mse()
             self.va_loss_main.append(float(val_metrics["loss"]))
             if self.cfg.mode == "multi":
                 self.va_loss_x0.append(float(val_metrics["loss_x0"]))
 
-            # Prepare sets and compute FID (training subset only; test handled post-training)
+            # Prepare sets and compute FID per variant (training/validation subsets)
             try:
                 fid_dirs = self._make_epoch_fid_dirs(epoch)
-                # Training FID subset
-                self._collect_train_subset(epoch, fid_dirs)
-                fid_train = compute_fid(
-                    str(fid_dirs['train_real']), str(fid_dirs['train_fake']), self.device, fid_batch_size=self.cfg.batch_size
-                )
-                # Validation FID subset
-                self._collect_val_subset(epoch, fid_dirs)
-                fid_val = compute_fid(
-                    str(fid_dirs['val_real']), str(fid_dirs['val_fake']), self.device, fid_batch_size=self.cfg.batch_size
-                )
-                # Optionally clean up whole epoch dir after both computations
+                fid_train_by = {}
+                fid_val_by = {}
+                variants = ["eps", "x0", "combined"] if self.cfg.mode == "multi" else ["eps"]
+                for mg in variants:
+                    self._collect_train_subset(epoch, fid_dirs, multi_gen=mg)
+                    fid_train_by[mg] = compute_fid(
+                        str(fid_dirs['train_real']), str(fid_dirs[f'train_fake_{mg}']), self.device, fid_batch_size=self.cfg.batch_size
+                    )
+                    self._collect_val_subset(epoch, fid_dirs, multi_gen=mg)
+                    fid_val_by[mg] = compute_fid(
+                        str(fid_dirs['val_real']), str(fid_dirs[f'val_fake_{mg}']), self.device, fid_batch_size=self.cfg.batch_size
+                    )
                 if not self.cfg.keep_fid_images:
                     try:
                         shutil.rmtree(fid_dirs.get('epoch_dir', Path("")), ignore_errors=True)
@@ -405,19 +457,33 @@ class UnifiedTrainer:
                     print(f"[fid] kept epoch {epoch+1} FID images at {fid_dirs['epoch_dir']}")
             except Exception as e:
                 print(f"[warn|fid|{self.cfg.mode}|{self.ds_key}] epoch={epoch+1} FID pipeline failed: {e}")
-                fid_train = float('nan')
-                fid_val = float('nan')
-            self.fid_train_hist.append(float(fid_train))
-            self.fid_val_hist.append(float(fid_val))
+                fid_train_by = {"eps": float('nan')}
+                fid_val_by = {"eps": float('nan')}
+            # Record histories (generic=eps)
+            self.fid_train_hist.append(float(fid_train_by.get('eps', float('nan'))))
+            self.fid_val_hist.append(float(fid_val_by.get('eps', float('nan'))))
+            self.fid_train_hist_eps.append(float(fid_train_by.get('eps', float('nan'))))
+            self.fid_val_hist_eps.append(float(fid_val_by.get('eps', float('nan'))))
+            if self.cfg.mode == "multi":
+                self.fid_train_hist_x0.append(float(fid_train_by.get('x0', float('nan'))))
+                self.fid_train_hist_combined.append(float(fid_train_by.get('combined', float('nan'))))
+                self.fid_val_hist_x0.append(float(fid_val_by.get('x0', float('nan'))))
+                self.fid_val_hist_combined.append(float(fid_val_by.get('combined', float('nan'))))
 
-            # Save best checkpoints (track best by validation loss; best FID checkpoint based on test is handled after testing if desired)
+            # Save best checkpoints by validation loss; and per-variant best FID for multi-task
             self._save_checkpoints(self.va_loss_main[-1], float('inf'))
+            if self.cfg.mode == "multi":
+                self._save_best_fid_per_variant(fid_val_by)
 
             # Validation log summary
             if self.cfg.mode == "multi":
-                print(f"[val] epoch {epoch+1}: loss={self.va_loss_main[-1]:.6f} | loss_x0={self.va_loss_x0[-1]:.6f} | FID_train={fid_train:.2f} | FID_val={fid_val:.2f}")
+                _fe = fid_val_by.get('eps', float('nan'))
+                _fx = fid_val_by.get('x0', float('nan'))
+                _fc = fid_val_by.get('combined', float('nan'))
+                print(f"[val] epoch {epoch+1}: loss={self.va_loss_main[-1]:.6f} | loss_x0={self.va_loss_x0[-1]:.6f} | FID_val eps/x0/comb = {_fe:.2f}/{_fx:.2f}/{_fc:.2f}")
             else:
-                print(f"[val] epoch {epoch+1}: loss={self.va_loss_main[-1]:.6f} | FID_train={fid_train:.2f} | FID_val={fid_val:.2f}")
+                _fe = self.fid_val_hist[-1] if self.fid_val_hist else float('nan')
+                print(f"[val] epoch {epoch+1}: loss={self.va_loss_main[-1]:.6f} | FID_val={_fe:.2f}")
 
             # Persist metrics/plots for this epoch
             self._save_metrics()

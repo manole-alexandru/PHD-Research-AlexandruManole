@@ -131,6 +131,9 @@ def save_curves_unified_prefixed(
     train_loss_x0=None, train_loss_cons=None, train_loss_total=None,
     val_loss_x0=None,
     fid_train=None, fid_val=None,
+    # Optional multi-variant FIDs
+    fid_train_eps=None, fid_train_x0=None, fid_train_combined=None,
+    fid_val_eps=None, fid_val_x0=None, fid_val_combined=None,
     file_prefix: str | None = None,
 ):
     logger = MetricsLogger(Path(out_dir), file_prefix)
@@ -146,6 +149,12 @@ def save_curves_unified_prefixed(
         val_loss_x0=val_loss_x0,
         fid_train=fid_train,
         fid_val=fid_val,
+        fid_train_eps=fid_train_eps,
+        fid_train_x0=fid_train_x0,
+        fid_train_combined=fid_train_combined,
+        fid_val_eps=fid_val_eps,
+        fid_val_x0=fid_val_x0,
+        fid_val_combined=fid_val_combined,
     )
 
 
