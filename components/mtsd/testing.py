@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import List
+import math
 import torch
 import csv as _csv
 import matplotlib
@@ -166,11 +167,27 @@ def run_post_training_testing(
                 colors.append('tab:orange')
             else:
                 colors.append('tab:green')
-        plt.figure(figsize=(max(10, len(labels) * 0.6), 4))
-        plt.bar(labels, values, color=colors)
-        plt.ylabel("FID (test)"); plt.title("Test FID - All Datasets and Modes"); plt.xticks(rotation=30, ha='right'); plt.tight_layout()
+        fig, ax = plt.subplots(figsize=(max(10, len(labels) * 0.6), 4))
+        bars = ax.bar(labels, values, color=colors)
+        ax.set_ylabel("FID (test)")
+        ax.set_title("Test FID - All Datasets and Modes")
+        ax.set_xticklabels(labels, rotation=30, ha='right')
+        # Add numeric labels on each bar
+        for rect, val in zip(bars, values):
+            try:
+                v = float(val)
+            except Exception:
+                v = float('nan')
+            if math.isfinite(v):
+                ax.text(
+                    rect.get_x() + rect.get_width() / 2,
+                    rect.get_height(),
+                    f"{v:.2f}",
+                    ha='center', va='bottom', fontsize=8,
+                )
+        fig.tight_layout()
         out_bar_all = metrics_dir / "test_fid_bar_all.png"
-        plt.savefig(out_bar_all, dpi=150); plt.close()
+        fig.savefig(out_bar_all, dpi=150); plt.close(fig)
         time.sleep(0.1)
         assert out_bar_all.exists() and out_bar_all.stat().st_size > 0, f"Bar plot not saved: {out_bar_all}"
 
