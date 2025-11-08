@@ -80,12 +80,6 @@ if __name__ == "__main__":
         default=1,
         help="Experiment number/id to use when creating EXP_ROOT (ignored if --exp-dir is provided).",
     )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=64,
-        help="Training DataLoader batch size.",
-    )
     args = parser.parse_args()
 
     data_choice = args.data.lower()
@@ -103,10 +97,11 @@ if __name__ == "__main__":
         DATASETS = ["cifar10", "mnist"]
 
     # Centralized constants (change once here)
-    EPOCHS = 10
+    EPOCHS = 15
     WITH_DSD = False
     TIMESTEPS = 200
     N_SAMPLE = 64
+    BATCH_SIZE = 128
     SAMPLE_EVERY = 500
     EXP_NO = int(args.exp_number)  # experiment number/id
 
@@ -128,7 +123,7 @@ if __name__ == "__main__":
         "TIMESTEPS": TIMESTEPS,
         "N_SAMPLE": N_SAMPLE,
         "SAMPLE_EVERY": SAMPLE_EVERY,
-        "BATCH_SIZE": int(args.batch_size),
+        "BATCH_SIZE": BATCH_SIZE,
         "LR": 2e-4,
         "BETA_START": 1e-4,
         "BETA_END": 0.02,
@@ -157,6 +152,7 @@ if __name__ == "__main__":
             mode="single",
             data=ds,
             epochs=EPOCHS,
+            batch_size=BATCH_SIZE,
             timesteps=TIMESTEPS,
             n_sample=N_SAMPLE,
             sample_every=SAMPLE_EVERY,
@@ -169,6 +165,7 @@ if __name__ == "__main__":
             mode="multi",
             data=ds,
             epochs=EPOCHS,
+            batch_size=BATCH_SIZE,
             timesteps=TIMESTEPS,
             n_sample=N_SAMPLE,
             sample_every=SAMPLE_EVERY,
@@ -185,6 +182,7 @@ if __name__ == "__main__":
                 mode="dsd",
                 data=ds,
                 epochs=EPOCHS,
+                batch_size=BATCH_SIZE,
                 timesteps=TIMESTEPS,
                 n_sample=N_SAMPLE,
                 sample_every=SAMPLE_EVERY,
