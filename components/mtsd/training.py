@@ -182,6 +182,39 @@ class UnifiedTrainer:
             'val_fake': va_fake,
         }
 
+    @torch.no_grad()
+    def _collect_train_subset(self, epoch_idx: int, fid_dirs):
+        """Prepare a subset of the training set for FID using cfg.fid_eval_images.
+
+        Writes PNGs into train_real and train_fake under the epoch folder.
+        """
+        # Real subset
+        collected = 0
+        imgs_accum = []
+        for imgs, _ in self.train_fid_loader:
+            imgs_accum.append(imgs)
+            collected += imgs.size(0)
+            if collected >= self.cfg.fid_eval_images:
+                break
+        real_train = torch.cat(imgs_accum, dim=0)[: self.cfg.fid_eval_images]
+        real_train = torch.nan_to_num(denorm(real_train, self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
+        dump_images(real_train, str(fid_dirs['train_real']), prefix=f"{self.file_prefix}_real")
+
+        # Fake subset (generate in chunks)
+        written = 0
+        while written < self.cfg.fid_eval_images:
+            n = min(self.cfg.n_sample, self.cfg.fid_eval_images - written)
+            _, fb = sample(
+                self.model,
+                self.ddpm,
+                shape=(n, self.channels, self.img_size, self.img_size),
+                device=self.device,
+                save_path=str(self.grid_dir / f"{self.file_prefix}_grid_trainfid_epoch{epoch_idx+1}.png"),
+            )
+            batch = torch.nan_to_num(denorm(fb.cpu(), self.channels), nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
+            dump_images(batch, str(fid_dirs['train_fake']), prefix=f"{self.file_prefix}_fake", start_index=written)
+            written += batch.size(0)
+
     def _collect_full_sets(self, epoch_idx: int, fid_dirs):
         # Train real (stream)
         idx = 0
