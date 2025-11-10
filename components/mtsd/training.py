@@ -470,9 +470,24 @@ class UnifiedTrainer:
                 self.fid_val_hist_x0.append(float(fid_val_by.get('x0', float('nan'))))
                 self.fid_val_hist_combined.append(float(fid_val_by.get('combined', float('nan'))))
 
-            # Save best checkpoints by validation loss; and per-variant best FID for multi-task
-            self._save_checkpoints(self.va_loss_main[-1], float('inf'))
+            # Save best checkpoints by validation loss and by FID
+            # Use generic FID for checkpointing: for multi-task take the best across variants,
+            # for single-task use the computed 'eps' FID.
+            try:
+                if self.cfg.mode == "multi":
+                    fid_val_generic = min(
+                        float(fid_val_by.get('eps', float('inf'))),
+                        float(fid_val_by.get('x0', float('inf'))),
+                        float(fid_val_by.get('combined', float('inf'))),
+                    )
+                else:
+                    fid_val_generic = float(fid_val_by.get('eps', float('nan')))
+            except Exception:
+                fid_val_generic = float('nan')
+
+            self._save_checkpoints(self.va_loss_main[-1], fid_val_generic)
             if self.cfg.mode == "multi":
+                # Also keep per-variant best FID checkpoints for analysis
                 self._save_best_fid_per_variant(fid_val_by)
 
             # Validation log summary
