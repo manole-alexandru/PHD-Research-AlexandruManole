@@ -30,7 +30,7 @@ except Exception:
                 yield
             return _noop()
 
-from models import TinyUNet, DeepSupervisedUNet
+from models import TinyUNet, DeepSupervisedUNet, resolve_model_size
 from diffusion import DDPM, DiffusionConfig
 from data_utils import make_dataloader, make_test_loader
 from sampling import sample
@@ -57,6 +57,8 @@ class TrainConfig:
     beta_end: float = 0.02
     base: int = 32
     time_dim: int = 128
+    mid_blocks: int = 1
+    model_size: str = "tiny"
     n_sample: int = 64
     sample_every: int = 500
     val_split: float = 0.05
@@ -126,11 +128,25 @@ class UnifiedTrainer:
             test_size = -1
         _ts = test_size if isinstance(test_size, int) and test_size >= 0 else 'unknown'
         print(f"[data|{cfg.mode}|{self.ds_key}] train={train_size} val={val_size} test={_ts} batch={cfg.batch_size}")
+        print(f"[model|{cfg.mode}|{self.ds_key}] size={cfg.model_size} base={cfg.base} time_dim={cfg.time_dim} mid_blocks={cfg.mid_blocks}")
 
         if cfg.mode == "dsd":
-            self.model: torch.nn.Module = DeepSupervisedUNet(in_channels=self.channels, base=cfg.base, time_dim=cfg.time_dim).to(self.device)
+            self.model: torch.nn.Module = DeepSupervisedUNet(
+                in_channels=self.channels,
+                base=cfg.base,
+                time_dim=cfg.time_dim,
+                mid_blocks=cfg.mid_blocks,
+                model_size=cfg.model_size,
+            ).to(self.device)
         else:
-            self.model = TinyUNet(in_channels=self.channels, base=cfg.base, time_dim=cfg.time_dim, multi_task=(cfg.mode=="multi")).to(self.device)
+            self.model = TinyUNet(
+                in_channels=self.channels,
+                base=cfg.base,
+                time_dim=cfg.time_dim,
+                mid_blocks=cfg.mid_blocks,
+                model_size=cfg.model_size,
+                multi_task=(cfg.mode=="multi"),
+            ).to(self.device)
         self.ddpm = DDPM(DiffusionConfig(timesteps=cfg.timesteps, beta_start=cfg.beta_start, beta_end=cfg.beta_end)).to(self.device)
         self.optim = torch.optim.AdamW(self.model.parameters(), lr=cfg.lr)
         # AMP scaler for faster training on CUDA
@@ -312,6 +328,8 @@ class UnifiedTrainer:
                 'ds_key': self.ds_key,
                 'base': self.cfg.base,
                 'time_dim': self.cfg.time_dim,
+                'mid_blocks': self.cfg.mid_blocks,
+                'model_size': self.cfg.model_size,
                 'channels': self.channels,
                 'timesteps': self.cfg.timesteps,
                 'beta_start': self.cfg.beta_start,
@@ -327,6 +345,8 @@ class UnifiedTrainer:
                 'ds_key': self.ds_key,
                 'base': self.cfg.base,
                 'time_dim': self.cfg.time_dim,
+                'mid_blocks': self.cfg.mid_blocks,
+                'model_size': self.cfg.model_size,
                 'channels': self.channels,
                 'timesteps': self.cfg.timesteps,
                 'beta_start': self.cfg.beta_start,
@@ -350,6 +370,8 @@ class UnifiedTrainer:
                     'ds_key': self.ds_key,
                     'base': self.cfg.base,
                     'time_dim': self.cfg.time_dim,
+                    'mid_blocks': self.cfg.mid_blocks,
+                    'model_size': self.cfg.model_size,
                     'channels': self.channels,
                     'timesteps': self.cfg.timesteps,
                     'beta_start': self.cfg.beta_start,
@@ -553,8 +575,10 @@ def train_unified(
     timesteps: int = 200,
     beta_start: float = 1e-4,
     beta_end: float = 0.02,
-    base: int = 32,
-    time_dim: int = 128,
+    base: int | None = None,
+    time_dim: int | None = None,
+    mid_blocks: int | None = None,
+    model_size: str = "tiny",
     n_sample: int = 64,
     sample_every: int = 500,
     val_split: float = 0.05,
@@ -569,6 +593,12 @@ def train_unified(
     dsd_w_aux_x0: float = 0.5,
     keep_fid_images: bool = False,
 ):
+    size_cfg = resolve_model_size(model_size)
+    resolved_base = size_cfg["base"] if base is None else base
+    resolved_time_dim = size_cfg["time_dim"] if time_dim is None else time_dim
+    resolved_mid_blocks = size_cfg["mid_blocks"] if mid_blocks is None else mid_blocks
+    if resolved_mid_blocks < 1:
+        raise ValueError(f"mid_blocks must be >=1, got {resolved_mid_blocks}")
     cfg = TrainConfig(
         save_root=save_root,
         mode=mode,
@@ -579,8 +609,10 @@ def train_unified(
         timesteps=timesteps,
         beta_start=beta_start,
         beta_end=beta_end,
-        base=base,
-        time_dim=time_dim,
+        base=resolved_base,
+        time_dim=resolved_time_dim,
+        mid_blocks=resolved_mid_blocks,
+        model_size=model_size,
         n_sample=n_sample,
         sample_every=sample_every,
         val_split=val_split,

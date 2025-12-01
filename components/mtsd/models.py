@@ -4,6 +4,21 @@ import torch
 import torch.nn as nn
 
 
+MODEL_SIZE_PRESETS = {
+    "tiny":   {"base": 32, "time_dim": 128, "mid_blocks": 1},
+    "small":  {"base": 48, "time_dim": 160, "mid_blocks": 1},
+    "normal": {"base": 64, "time_dim": 256, "mid_blocks": 2},
+    "big":    {"base": 96, "time_dim": 256, "mid_blocks": 3},  # extra mid blocks for capacity
+}
+
+
+def resolve_model_size(model_size: str):
+    key = (model_size or "tiny").lower()
+    if key not in MODEL_SIZE_PRESETS:
+        raise ValueError(f"Unknown model_size '{model_size}'. Choose one of: {list(MODEL_SIZE_PRESETS.keys())}")
+    return MODEL_SIZE_PRESETS[key]
+
+
 class SinusoidalPositionEmbeddings(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
@@ -40,9 +55,23 @@ class ConvBlock(nn.Module):
 
 
 class TinyUNet(nn.Module):
-    def __init__(self, in_channels=1, base=32, time_dim=128, multi_task: bool=False):
+    def __init__(
+        self,
+        in_channels=1,
+        base: int | None = None,
+        time_dim: int | None = None,
+        mid_blocks: int | None = None,
+        model_size: str = "tiny",
+        multi_task: bool=False,
+    ):
         super().__init__()
         self.multi_task = multi_task
+        size_cfg = resolve_model_size(model_size)
+        base = base if base is not None else size_cfg["base"]
+        time_dim = time_dim if time_dim is not None else size_cfg["time_dim"]
+        mid_blocks = mid_blocks if mid_blocks is not None else size_cfg["mid_blocks"]
+        if mid_blocks < 1:
+            raise ValueError(f"mid_blocks must be >=1, got {mid_blocks}")
         self.time_dim = time_dim
         self.time_mlp = nn.Sequential(
             SinusoidalPositionEmbeddings(time_dim),
@@ -54,7 +83,7 @@ class TinyUNet(nn.Module):
         self.block1 = ConvBlock(base, base * 2, time_dim)
         self.down2 = nn.Sequential(nn.Conv2d(base * 2, base * 2, 3, stride=2, padding=1), nn.SiLU())
         self.block2 = ConvBlock(base * 2, base * 4, time_dim)
-        self.mid = ConvBlock(base * 4, base * 4, time_dim)
+        self.mid = nn.ModuleList([ConvBlock(base * 4, base * 4, time_dim) for _ in range(mid_blocks)])
         self.up1 = nn.ConvTranspose2d(base * 4, base * 2, 2, stride=2)
         self.block_up1 = ConvBlock(base * 4, base * 2, time_dim)
         self.up2 = nn.ConvTranspose2d(base * 2, base, 2, stride=2)
@@ -69,7 +98,9 @@ class TinyUNet(nn.Module):
         x0 = self.inc(x, t_emb)
         x1 = self.down1(x0); x1 = self.block1(x1, t_emb)
         x2 = self.down2(x1); x2 = self.block2(x2, t_emb)
-        m = self.mid(x2, t_emb)
+        m = x2
+        for block in self.mid:
+            m = block(m, t_emb)
         u1 = self.up1(m); u1 = torch.cat([u1, x1], dim=1); u1 = self.block_up1(u1, t_emb)
         u2 = self.up2(u1); u2 = torch.cat([u2, x0], dim=1); u2 = self.block_up2(u2, t_emb)
         if self.multi_task:
@@ -84,8 +115,21 @@ class DeepSupervisedUNet(nn.Module):
     Returns final eps in forward() for sampling compatibility, and
     exposes forward_with_heads() to get intermediate predictions.
     """
-    def __init__(self, in_channels=1, base=32, time_dim=128):
+    def __init__(
+        self,
+        in_channels=1,
+        base: int | None = None,
+        time_dim: int | None = None,
+        mid_blocks: int | None = None,
+        model_size: str = "tiny",
+    ):
         super().__init__()
+        size_cfg = resolve_model_size(model_size)
+        base = base if base is not None else size_cfg["base"]
+        time_dim = time_dim if time_dim is not None else size_cfg["time_dim"]
+        mid_blocks = mid_blocks if mid_blocks is not None else size_cfg["mid_blocks"]
+        if mid_blocks < 1:
+            raise ValueError(f"mid_blocks must be >=1, got {mid_blocks}")
         self.time_dim = time_dim
         self.time_mlp = nn.Sequential(
             SinusoidalPositionEmbeddings(time_dim),
@@ -97,7 +141,7 @@ class DeepSupervisedUNet(nn.Module):
         self.block1 = ConvBlock(base, base * 2, time_dim)
         self.down2 = nn.Sequential(nn.Conv2d(base * 2, base * 2, 3, stride=2, padding=1), nn.SiLU())
         self.block2 = ConvBlock(base * 2, base * 4, time_dim)
-        self.mid = ConvBlock(base * 4, base * 4, time_dim)
+        self.mid = nn.ModuleList([ConvBlock(base * 4, base * 4, time_dim) for _ in range(mid_blocks)])
         self.up1 = nn.ConvTranspose2d(base * 4, base * 2, 2, stride=2)
         self.block_up1 = ConvBlock(base * 4, base * 2, time_dim)
         self.up2 = nn.ConvTranspose2d(base * 2, base, 2, stride=2)
@@ -113,7 +157,9 @@ class DeepSupervisedUNet(nn.Module):
         x0 = self.inc(x, t_emb)
         x1 = self.down1(x0); x1 = self.block1(x1, t_emb)
         x2 = self.down2(x1); x2 = self.block2(x2, t_emb)
-        m = self.mid(x2, t_emb)
+        m = x2
+        for block in self.mid:
+            m = block(m, t_emb)
         eps_mid = self.head_eps_mid(m)
         u1 = self.up1(m); u1 = torch.cat([u1, x1], dim=1); u1 = self.block_up1(u1, t_emb)
         eps_up1 = self.head_eps_up1(u1)
