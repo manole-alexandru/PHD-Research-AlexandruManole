@@ -26,7 +26,7 @@ if str(CUR_DIR) not in sys.path:
 from training import train_unified, evaluate_mse_unified  # type: ignore
 from data_utils import make_test_loader  # type: ignore
 from diffusion import DDPM, DiffusionConfig  # type: ignore
-from models import TinyUNet, DeepSupervisedUNet  # type: ignore
+from models import TinyUNet, DeepSupervisedUNet, resolve_model_size  # type: ignore
 from metrics_utils import denorm, dump_images, compute_fid  # type: ignore
 from sampling import sample  # type: ignore
 from testing import run_post_training_testing  # type: ignore
@@ -80,6 +80,12 @@ if __name__ == "__main__":
         default=1,
         help="Experiment number/id to use when creating EXP_ROOT (ignored if --exp-dir is provided).",
     )
+    parser.add_argument(
+        "--model-size",
+        choices=["tiny", "small", "normal", "big"],
+        default="tiny",
+        help="Diffusion model capacity: tiny (default), small, normal, big (adds extra mid blocks).",
+    )
     args = parser.parse_args()
 
     data_choice = args.data.lower()
@@ -95,6 +101,12 @@ if __name__ == "__main__":
         DATASETS = []
     else:
         DATASETS = ["cifar10", "mnist"]
+
+    MODEL_SIZE = args.model_size.lower()
+    size_cfg = resolve_model_size(MODEL_SIZE)
+    BASE = size_cfg["base"]
+    TIME_DIM = size_cfg["time_dim"]
+    MID_BLOCKS = size_cfg["mid_blocks"]
 
     # Centralized constants (change once here)
     EPOCHS = 30
@@ -127,8 +139,10 @@ if __name__ == "__main__":
         "LR": 2e-4,
         "BETA_START": 1e-4,
         "BETA_END": 0.02,
-        "BASE": 32,
-        "TIME_DIM": 128,
+        "BASE": BASE,
+        "TIME_DIM": TIME_DIM,
+        "MID_BLOCKS": MID_BLOCKS,
+        "MODEL_SIZE": MODEL_SIZE,
         "VAL_SPLIT": 0.05,
         "FID_EVAL_IMAGES": 2048,
         "W_X0": 1.0,
@@ -153,6 +167,10 @@ if __name__ == "__main__":
             data=ds,
             epochs=EPOCHS,
             batch_size=BATCH_SIZE,
+            base=BASE,
+            time_dim=TIME_DIM,
+            mid_blocks=MID_BLOCKS,
+            model_size=MODEL_SIZE,
             timesteps=TIMESTEPS,
             n_sample=N_SAMPLE,
             sample_every=SAMPLE_EVERY,
@@ -166,6 +184,10 @@ if __name__ == "__main__":
             data=ds,
             epochs=EPOCHS,
             batch_size=BATCH_SIZE,
+            base=BASE,
+            time_dim=TIME_DIM,
+            mid_blocks=MID_BLOCKS,
+            model_size=MODEL_SIZE,
             timesteps=TIMESTEPS,
             n_sample=N_SAMPLE,
             sample_every=SAMPLE_EVERY,
@@ -183,6 +205,10 @@ if __name__ == "__main__":
                 data=ds,
                 epochs=EPOCHS,
                 batch_size=BATCH_SIZE,
+                base=BASE,
+                time_dim=TIME_DIM,
+                mid_blocks=MID_BLOCKS,
+                model_size=MODEL_SIZE,
                 timesteps=TIMESTEPS,
                 n_sample=N_SAMPLE,
                 sample_every=SAMPLE_EVERY,

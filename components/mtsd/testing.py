@@ -13,7 +13,7 @@ import shutil
 
 from data_utils import make_test_loader  # type: ignore
 from diffusion import DDPM, DiffusionConfig  # type: ignore
-from models import TinyUNet, DeepSupervisedUNet  # type: ignore
+from models import TinyUNet, DeepSupervisedUNet, resolve_model_size  # type: ignore
 from metrics_utils import denorm, dump_images, compute_fid  # type: ignore
 from sampling import sample  # type: ignore
 
@@ -65,18 +65,34 @@ def run_post_training_testing(
                     continue
 
                 payload = torch.load(ckpt_path, map_location="cpu")
+                # Resolve architecture settings (fallback to tiny for old checkpoints)
+                payload_size = payload.get('model_size', 'tiny')
+                try:
+                    size_cfg = resolve_model_size(payload_size)
+                except Exception:
+                    size_cfg = resolve_model_size("tiny")
+                    payload_size = "tiny"
+                base = payload.get('base', size_cfg["base"]) or size_cfg["base"]
+                time_dim = payload.get('time_dim', size_cfg["time_dim"]) or size_cfg["time_dim"]
+                mid_blocks = payload.get('mid_blocks', size_cfg["mid_blocks"]) or size_cfg["mid_blocks"]
+                if mid_blocks < 1:
+                    mid_blocks = size_cfg["mid_blocks"]
                 # Build model per mode
                 if mode == "dsd":
                     model = DeepSupervisedUNet(
                         in_channels=channels,
-                        base=payload.get('base', 32),
-                        time_dim=payload.get('time_dim', 128),
+                        base=base,
+                        time_dim=time_dim,
+                        mid_blocks=mid_blocks,
+                        model_size=payload_size,
                     ).to(device)
                 else:
                     model = TinyUNet(
                         in_channels=channels,
-                        base=payload.get('base', 32),
-                        time_dim=payload.get('time_dim', 128),
+                        base=base,
+                        time_dim=time_dim,
+                        mid_blocks=mid_blocks,
+                        model_size=payload_size,
                         multi_task=(mode == "multi"),
                     ).to(device)
                 model.load_state_dict(payload['state_dict'])
